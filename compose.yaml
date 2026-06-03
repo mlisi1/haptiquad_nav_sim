@@ -1,0 +1,45 @@
+services:
+  haptiquad_nav_sim:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      network: host
+    image: haptiquad_nav_sim:latest
+    container_name: haptiquad_nav_sim
+
+    network_mode: host
+    ipc: host
+    pid: host
+    runtime: nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    privileged: true
+
+    user: anydev
+
+    environment:
+      DISPLAY: ${DISPLAY}
+      USERNAME: anydev
+      XAUTHORITY: /tmp/.Xauthority
+      NVIDIA_DRIVER_CAPABILITIES: all,graphics,display,video,utility,compute
+
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ~/.Xauthority:/tmp/.Xauthority:ro
+      - ./anymal_sim:/home/anydev/anymal_ws
+      - ./haptiquad_nav_ws:/home/anydev/anymal_ws
+      - ./.devcontainer:/commandhistory
+      - /dev/shm:/dev/shm
+      - /etc/localtime:/etc/localtime:ro
+
+
+    stdin_open: true
+    tty: true
+
+    entrypoint: /usr/bin/bash

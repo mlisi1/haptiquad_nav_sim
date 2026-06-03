@@ -1,0 +1,5 @@
+anymal_sim/
+haptiquad_nav_ws/devel
+haptiquad_nav_ws/build
+haptiquad_nav_ws/.catkin_workspace
+haptiquad_nav_ws/src/CMakeLists.txt

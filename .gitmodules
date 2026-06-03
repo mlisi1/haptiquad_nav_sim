@@ -1,0 +1,11 @@
+[submodule "haptiquad_nav_ws/src/haptiquad_ros"]
+	path = haptiquad_nav_ws/src/haptiquad_ros
+	url = https://github.com/mlisi1/haptiquad_ros.git
+[submodule "haptiquad_nav_ws/src/haptiquad"]
+	path = haptiquad_nav_ws/src/haptiquad
+	url = https://github.com/mlisi1/haptiquad.git
+	branch = noetic
+[submodule "haptiquad_nav_ws/src/anymal_c_simple_description"]
+	path = haptiquad_nav_ws/src/anymal_c_simple_description
+	url = git@github.com:mlisi1/anymal_c_simple_description.git
+	branch = noetic-floating-base
