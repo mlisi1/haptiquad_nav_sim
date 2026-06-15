@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<launch>
+
+  <!-- Convenience launch file loading the configuration and running the simulation software stack. -->
+
+  <!-- Configuration -->
+  <arg name="robot"                    default="c"                                                                                 doc="Robot, e.g. 'chip' or 'chap'. Use 'c' for generic robot."/>
+  <arg name="environment_data_package" default=""                                                                   doc="If your environment data is stored in a catkin package, use this argument to automatically search for it instead of giving an absolute path."/>
+  <arg name="environment_data_path"    default="$(eval find (environment_data_package) if environment_data_package != '' else '')" doc="Absolute path to the environment data folder."/>
+  <arg name="environment_config"       default="default"                                                                           doc="Name of the environment configuration. It must be stored at 'environment_data_path/configs/environment_config.yaml.'"/>
+  <arg name="setup"                    default="sim"                                                                               doc="Configuration setup. Options: sim, sim_lite."/>
+  <arg name="extension"                default="none"                                                                              doc="Configuration extension file in YAML format."/>
+
+  <!-- Configuration files -->
+  <arg name="robot_config_file"       default="$(eval find('anymal_' + robot) + '/config/robot/robot.yaml')"                                                      doc="Full path of the robot configuration file."/>
+  <arg name="environment_config_file" default="$(eval environment_data_path + '/configs/' + environment_config + '.yaml' if environment_data_path != '' else '')" doc="Full path of the environment configuration file."/>
+  <arg name="setup_config_file"       default="$(find anymal_c)/config/setup/$(arg setup).yaml"                                                                   doc="Full path of the setup configuration file."/>
+  <arg name="extension_config_file"   default="$(find anymal_c)/config/extension/$(arg extension).yaml"                                                           doc="Full path of the extension configuration file."/>
+
+  <!-- Feature toggles -->
+  <arg name="state_estimator_module"        default="simulated" doc="State estimator module to run. Options: real, simulated (only in simulation)."/>
+  <arg name="slam_module"                   default="simulated" doc="SLAM module to run. Options: real, simulated (only in simulation)."/>
+  <arg name="point_cloud_odometry_module"   default="simulated" doc="Point cloud odometry module to run. Options: real, simulated (only in simulation)."/>
+  <arg name="docking"                       default="disabled"  doc="Run the docking software. Options: disabled, enabled."/>
+  <arg name="application_module"            default="apc"       doc="Application module installed in ANYmal. Options: apc, agpu"/>
+  <arg name="battery_model"                 default="regular"   doc="Battery model mounted on ANYmal. Options: regular, travel"/>
+  <arg name="inspection_payload"            default="disabled"  doc="Run the inspection payload software. Options: disabled, enabled."/>
+  <arg name="auditive_inspection_frequency" default="disabled"  doc="Run the inspection software for analyzing audio frequencies. Options: disabled, enabled."/>
+  <arg name="visual_inspection_dial"        default="disabled"  doc="Run the inspection software for reading dials. Options: disabled, enabled."/>
+  <arg name="inspection_intelligence"       default="disabled"  doc="Run the inspection software for reading objects. Options: disabled, enabled."/>
+  <arg name="diagnostic_mode"               default="disabled"  doc="Run the diagnostic mode. Note that enabling diagnostic mode is only supported with the 'new' motion control module. Options: disabled, enabled."/>
+  <arg name="trekker"                       default="enabled"   doc="Use a learning-based controller for walking. Options: disabled, enabled (default)."/>
+  <arg name="gui"                           default="legacy"    doc="Select the GUI to use. Options: legacy, new."/>
+
+  <!-- Load the configuration -->
+  <include file="$(eval find('haptiquad_anymal_bringup') + '/launch/load_robot_config.launch')" pass_all_args="true"/>
+
+  <!-- Start the simulation -->
+  <include file="$(find stack_launcher)/launch/stack_launcher.launch">
+    <arg name="stack"         value="sim"/>
+    <arg name="trigger_param" value="/config_loaded"/>
+  </include>
+
+</launch>

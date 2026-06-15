@@ -46,10 +46,22 @@ RUN sudo apt-get install -y \
     ros-noetic-gazebo-ros-control \
     ros-noetic-joint-state-publisher-gui \
     ros-noetic-plotjuggler-ros \
-    ros-noetic-plotjuggler 
+    ros-noetic-plotjuggler \
+    ros-noetic-move-base \
+    ros-noetic-nav-core \
+    ros-noetic-costmap-2d \
+    ros-noetic-navfn \
+    ros-noetic-base-local-planner \
+    ros-noetic-dwa-local-planner \
+    ros-noetic-rotate-recovery \
+    ros-noetic-clear-costmap-recovery \
+    ros-noetic-map-server 
 
 # optional workspace directory
 WORKDIR /home/anydev/anymal_ws
+
+RUN echo 'source /home/anydev/anymal_ws/devel/setup.bash' >> ~/.bashrc
+
 
 # keep default behavior similar to your run command
 CMD ["/usr/bin/bash"]

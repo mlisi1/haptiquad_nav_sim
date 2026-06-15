@@ -1,0 +1,19 @@
+<launch>
+
+  <!-- Pass arguments (optional) -->
+  <arg name="use_sim_time" default="false"/>
+  <arg name="force" default="false"/>
+  <arg name="residual" default="false"/>
+
+  <!-- Include another launch file -->
+  <include file="$(find anymal_c_simple_description)/launch/load_fb.launch">
+  </include>
+
+  <!-- Include another launch file -->
+  <include file="$(find haptiquad_ros)/launch/haptiquad_anymal.launch" />
+
+  <!-- Include launch file from a different package -->
+  <include file="$(find haptiquad_plot)/launch/force_plotter.launch" if="$(arg force)" />
+  <include file="$(find haptiquad_plot)/launch/residual_plotter.launch" if="$(arg residual)" />
+
+</launch>
