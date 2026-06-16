@@ -4,17 +4,19 @@
   Test environment for the HaptiQuad tactile navigation framework.
 
   Layout (robot starts at origin, facing +X):
-    x=2.0  cube_light_1   5 kg   GREEN  → expected: MOVABLE (robot pushes through)
+    x=2.0  cube_light_1   30 kg  GREEN  → expected: MOVABLE (robot pushes through)
     x=3.5  cube_heavy_1  200 kg  RED    → expected: SOLID   (robot replans)
-    x=5.0  cube_light_2   5 kg   GREEN  → expected: MOVABLE (robot pushes through)
+    x=5.0  cube_light_2   30 kg  GREEN  → expected: MOVABLE (robot pushes through)
     x=6.5  cube_heavy_2  200 kg  RED    → expected: SOLID   (robot replans)
     x=8.0  cube_heavy_3  200 kg  RED    → expected: SOLID   (robot replans)
 
   Cube dimensions: 0.5 m × 0.5 m × 1.0 m (tall enough to enter the lidar
   height filter window: 0.05–0.8 m above base_link ≈ 0.64–1.39 m AGL).
 
-  Light cubes use μ=0.1 friction so the robot can displace them at probe speed
-  (0.03 m/s). Heavy cubes use μ=0.8; 200 kg × 9.81 × 0.8 ≈ 1570 N of static
+  Light cubes: 30 kg, μ=0.1 → ground friction ≈ 29 N (above the 15 N fx
+  threshold so contact is detected) but ANYmal can push them at probe speed.
+  5 kg was too light: only ~5 N friction, below detection threshold entirely.
+  Heavy cubes use μ=0.8; 200 kg × 9.81 × 0.8 ≈ 1570 N of static
   friction — the robot cannot push them.
 
   Navigation goal to send after launching:
@@ -90,20 +92,23 @@
       </link>
     </model>
 
-    <!-- ── LIGHT CUBE 1 — x=2.0, 5 kg, GREEN ──────────────────────────── -->
+    <!-- ── LIGHT CUBE 1 — x=2.0, 30 kg, GREEN ─────────────────────────── -->
+    <!-- Mass raised from 5→30 kg: 5 kg at mu=0.1 produces only ~5 N friction,
+         below the 15 N fx threshold. 30 kg gives ~29 N — detectable and still
+         pushable by ANYmal at probe speed. -->
     <model name="cube_light_1">
       <pose>2.0 0 0.5 0 0 0</pose>
       <link name="link">
         <inertial>
-          <mass>5.0</mass>
+          <mass>30.0</mass>
           <!-- Solid box 0.5×0.5×1.0 m: Ixx=Iyy=m/12*(0.25+1.0), Izz=m/12*(0.25+0.25) -->
           <inertia>
-            <ixx>0.5208</ixx>
+            <ixx>3.125</ixx>
             <ixy>0</ixy>
             <ixz>0</ixz>
-            <iyy>0.5208</iyy>
+            <iyy>3.125</iyy>
             <iyz>0</iyz>
-            <izz>0.2083</izz>
+            <izz>1.25</izz>
           </inertia>
         </inertial>
         <collision name="collision">
@@ -175,19 +180,19 @@
       </link>
     </model>
 
-    <!-- ── LIGHT CUBE 2 — x=5.0, 5 kg, GREEN ──────────────────────────── -->
+    <!-- ── LIGHT CUBE 2 — x=5.0, 30 kg, GREEN ─────────────────────────── -->
     <model name="cube_light_2">
       <pose>5.0 0 0.5 0 0 0</pose>
       <link name="link">
         <inertial>
-          <mass>5.0</mass>
+          <mass>30.0</mass>
           <inertia>
-            <ixx>0.5208</ixx>
+            <ixx>3.125</ixx>
             <ixy>0</ixy>
             <ixz>0</ixz>
-            <iyy>0.5208</iyy>
+            <iyy>3.125</iyy>
             <iyz>0</iyz>
-            <izz>0.2083</izz>
+            <izz>1.25</izz>
           </inertia>
         </inertial>
         <collision name="collision">
