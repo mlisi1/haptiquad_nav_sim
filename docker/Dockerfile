@@ -55,7 +55,8 @@ RUN sudo apt-get install -y \
     ros-noetic-dwa-local-planner \
     ros-noetic-rotate-recovery \
     ros-noetic-clear-costmap-recovery \
-    ros-noetic-map-server 
+    ros-noetic-map-server \
+    ros-noetic-pointcloud-to-laserscan
 
 # optional workspace directory
 WORKDIR /home/anydev/anymal_ws
