@@ -5855,7 +5855,7 @@ stack_launcher:
       preprocessed_params:
         roslaunch_args:
           key: /stack_launcher/nodes/gazebo/roslaunch/args
-          value: --verbose -e ode $(rospack find haptiquad_anymal_bringup)/worlds/contact_classification_test.world
+          value: --verbose -e ode $(rospack find haptiquad_anymal_bringup)/worlds/mixed_obstacles_test.world
         roslaunch_env_args_gazebo_model_path:
           key: /stack_launcher/nodes/gazebo/roslaunch/env_args/gazebo_model_path/value
           value: $(rospack find gazebo_worlds)/..
@@ -6229,7 +6229,7 @@ stack_launcher:
           value: [/usr/share/gazebo-11/models]
         world_file:
           key: /rviz_world_loader/world_file
-          value: "$(rospack find haptiquad_anymal_bringup)/worlds/contact_classification_test.world"
+          value: "$(rospack find haptiquad_anymal_bringup)/worlds/mixed_obstacles_test.world"
       roslaunch:
         name: rviz_world_loader
         node_type: rviz_world_loader_node.py
