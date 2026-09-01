@@ -18,7 +18,7 @@ docker compose -f compose.yaml exec haptiquad_nav_sim bash
 source /opt/ros/noetic/setup.bash
 source /home/anydev/anymal_ws/devel/setup.bash
 cd /home/anydev/anymal_ws
-catkin_make --pkg haptiquad_anymal_bringup haptiquad_nav
+catkin_make --pkg haptiquad_nav haptiquad_anymal_bringup
 ```
 
 ---
@@ -32,8 +32,13 @@ roslaunch haptiquad_nav navigation.launch
 This automatically:
 1. Clears the ANYmal emergency stop
 2. Switches the motion controller to trekker/walk mode
-3. Starts move_base (global + local costmaps), odometry bridge, wrench bridge, contact probe manager, and the RViz goal relay
-4. Opens RViz with a pre-configured display layout (costmaps, plans, obstacles). Disable with `rviz:=false`
+3. Starts move_base (global + local costmaps, custom `HaptiQuadNavPlanner` local planner), the odometry bridge, wrench bridge, contact probe manager, twist stamper, RViz goal relay, and the debug perception costmap
+
+RViz is **off by default**. Open it with:
+
+```bash
+roslaunch haptiquad_nav navigation.launch rviz:=true
+```
 
 If the robot is already in walk mode (e.g. relaunching nav only):
 
@@ -51,7 +56,7 @@ Or from the command line:
 
 ```bash
 rostopic pub -1 /move_base_simple/goal geometry_msgs/PoseStamped \
-  '{header: {frame_id: map}, pose: {position: {x: 2.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}'
+  '{header: {frame_id: map}, pose: {position: {x: 14.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}'
 ```
 
 ---
@@ -60,28 +65,41 @@ rostopic pub -1 /move_base_simple/goal geometry_msgs/PoseStamped \
 
 | Topic | What it tells you |
 |-------|------------------|
-| `/anymal/base_wrench` | Contact force on base (world frame) |
-| `/haptiquad_nav/solid_obstacles` | Accumulated confirmed-solid obstacle points |
+| `/anymal/base_wrench` | Contact force on base (world frame) — the contact-detection signal |
+| `/haptiquad_nav/speed_limit` | Current speed cap published by the contact probe state machine |
+| `/haptiquad_nav/solid_obstacles` | Accumulated confirmed-solid obstacle points (fed into the global costmap) |
+| `/haptiquad_nav/movable_obstacles` | Tracked centers of confirmed-movable obstacles (visualization only, not in any costmap) |
 | `/move_base/status` | Active navigation goal status |
-| `/path_planning_and_following/twist` | Gated velocity output (after contact probe state machine) |
+| `/path_planning_and_following/twist` | Gated velocity output (after the contact probe state machine and twist_mux) |
 
 ---
 
-## Test World
+## Test Worlds
 
-`haptiquad_anymal_bringup/worlds/contact_classification_test.world` — load this instead of `empty.world` to test the full classification pipeline.
+Two worlds are available under `haptiquad_anymal_bringup/worlds/`. The active world is set by **two** references in `haptiquad_anymal_bringup/config/default.yaml` (the Gazebo server args and the `rviz_world_loader` config) — both must point to the same file.
 
-Five cubes in a row along +X (robot starts at origin):
+### `mixed_obstacles_test.world` (current default)
 
-| Name | x (m) | Mass | Friction | Color | Expected result |
-|------|--------|------|----------|-------|----------------|
+9 objects at varied x/y positions (x ≈ 2.5–12.0 m, y ≈ −0.8 to +0.9 m), mix of boxes and cylinders, all 1.0 m tall. Send a goal at `(14.0, 0.0)` in map frame.
+
+| Object | Shape | Mass | μ | Color | Expected |
+|--------|-------|------|---|-------|---------|
+| solid_box_1..4 | 0.5×0.5×1.0 m box | 200 kg | 0.8 | Red | SOLID |
+| solid_cyl_1..2 | r=0.25, h=1.0 m cylinder | 200 kg | 0.8 | Red | SOLID |
+| movable_box_1..2 | 0.5×0.5×1.0 m box | 5 kg | 0.05 | Green | MOVABLE |
+| movable_cyl_1 | r=0.25, h=1.0 m cylinder | 5 kg | 0.05 | Green | MOVABLE |
+
+### `contact_classification_test.world` (reference / regression)
+
+Five cubes in a row along +X (robot starts at origin), 0.5×0.5×1.0 m each, 1.5 m center-to-center. Send a goal at `(10.0, 0.0)` in map frame.
+
+| Name | x (m) | Mass | μ | Color | Expected |
+|------|--------|------|---|-------|---------|
 | cube_light_1 | 2.0 | 5 kg | 0.1 | Green | MOVABLE |
 | cube_heavy_1 | 3.5 | 200 kg | 0.8 | Red | SOLID → replan |
 | cube_light_2 | 5.0 | 5 kg | 0.1 | Green | MOVABLE |
 | cube_heavy_2 | 6.5 | 200 kg | 0.8 | Red | SOLID → replan |
 | cube_heavy_3 | 8.0 | 200 kg | 0.8 | Red | SOLID → replan |
-
-Send a goal at `(10.0, 0.0)` in map frame to drive through all cubes.
 
 ---
 

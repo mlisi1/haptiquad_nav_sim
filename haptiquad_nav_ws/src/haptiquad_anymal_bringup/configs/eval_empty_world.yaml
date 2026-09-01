@@ -1,0 +1,25 @@
+# eval_empty_world.yaml — environment_config overlay for the eval harness.
+#
+# Loaded by load_robot_config.launch AFTER config/default.yaml (see that
+# file's "Overlay environment configuration" line), so this only needs to
+# contain the keys we actually want to override -- rosparam load merges
+# into the existing tree rather than replacing it. This is the exact
+# mechanism CLAUDE.md's "To switch worlds, change both references..." note
+# refers to, just applied as an overlay instead of hand-editing
+# default.yaml directly, so normal navigation.launch use is unaffected.
+#
+# Usage: roslaunch haptiquad_anymal_bringup sim_eval.launch
+# (a thin wrapper around sim.launch that sets
+#  environment_data_package:=haptiquad_anymal_bringup
+#  environment_config:=eval_empty_world)
+
+stack_launcher:
+  nodes:
+    gazebo:
+      preprocessed_params:
+        roslaunch_args:
+          value: "--verbose -e ode $(rospack find haptiquad_anymal_bringup)/worlds/empty_eval.world"
+    rviz_world_loader:
+      preprocessed_params:
+        world_file:
+          value: "$(rospack find haptiquad_anymal_bringup)/worlds/empty_eval.world"

@@ -1,0 +1,4 @@
+# Default eval-run output (see sweep_orchestrator.py / trial_logger.py
+# _default_results_dir() -- override with the results_dir rosparam).
+# Can be large; never commit trial data.
+.results/

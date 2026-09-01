@@ -1,0 +1,22 @@
+<launch>
+  <!-- Runs an unattended mass/friction/approach sweep and logs extensive
+       per-trial data (native-rate time series + one summary CSV row/trial).
+
+       Requires:
+         1. haptiquad_anymal_bringup/launch/sim_eval.launch (empty world)
+            already running instead of the normal sim.launch.
+         2. haptiquad_nav's navigation.launch already running on top of it. -->
+
+  <rosparam file="$(find haptiquad_nav_eval)/config/sweep.yaml" command="load"/>
+
+  <!-- Override the sweep's experiment tag / output location per run, e.g.:
+       roslaunch haptiquad_nav_eval eval_sweep.launch tag:=run_2026_08_31 -->
+  <arg name="tag" default=""/>
+  <param name="experiment_tag" value="$(arg tag)" if="$(eval tag != '')"/>
+
+  <node name="trial_logger" pkg="haptiquad_nav_eval"
+        type="trial_logger.py" output="screen"/>
+
+  <node name="sweep_orchestrator" pkg="haptiquad_nav_eval"
+        type="sweep_orchestrator.py" output="screen"/>
+</launch>

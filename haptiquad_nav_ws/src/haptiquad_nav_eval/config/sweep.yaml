@@ -1,0 +1,45 @@
+# sweep.yaml — shared params for the HaptiQuad-Nav evaluation harness.
+# Loaded GLOBALLY (no namespace) by eval_sweep.launch, matching how
+# haptiquad_nav/config/contact_probe.yaml is loaded — read via plain
+# rospy.get_param('key', default) in every eval script.
+
+experiment_tag: "sweep_01"
+
+# Where the eval object is spawned each trial, relative to the robot's pose
+# right after that trial's reset (read fresh from /slam/pose every time,
+# not assumed constant).
+approach_distance: 3.0       # [m] object placed this far ahead of the robot's reset pose
+goal_overshoot: 1.5          # [m] goal placed this far past the object along the approach line
+settle_time: 1.0             # [s] pause after spawning the object before sending the goal
+reset_settle_time: 1.5       # [s] pause after the sim/estimator reset before trusting /slam/pose
+
+# Safety-net timeouts (also independently enforced by trial_logger.py's own
+# watchdog, so a trial is never silently dropped from the summary CSV).
+# no_contact_timeout must exceed contact_probe.yaml's probe_timeout (20s
+# default) so contact_probe_manager's own timeout resolves first.
+no_contact_timeout: 25.0     # [s] give up waiting for CONTACT_PROBE entry
+trial_timeout: 60.0          # [s] overall per-trial safety net
+
+repeats: 1                   # repeats per (geometry, mass, mu, angle, offset) combo
+
+# Where CSVs are written. Defaults to <this package>/.results (a hidden,
+# gitignored folder under the source tree, NOT the container's home dir) so
+# results land on the host bind-mount and are visible outside Docker.
+# results_dir: "/home/anydev/haptiquad_eval_results"
+
+geometries:
+  - name: box
+    size_x: 0.5
+    size_y: 0.5
+    size_z: 1.0
+  - name: cylinder
+    size_x: 0.5      # diameter
+    size_y: 0.5      # unused for cylinder, kept for schema symmetry
+    size_z: 1.0
+
+# ── sweep_orchestrator.py sweep matrix ──────────────────────────────────
+sweep:
+  mass_kg: [1, 5, 7, 10, 15, 20, 25, 30]
+  mu: [0.05, 0.1, 0.2, 0.4]
+  approach_angle_deg: [0.0]
+  approach_offset_m: [0.0]

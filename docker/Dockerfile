@@ -41,6 +41,7 @@ RUN sudo apt-get install -y \
     python3-tk \
     python3-pip \
     python3-pil.imagetk \
+    python3-pandas \
     ros-noetic-robot-state-publisher \
     ros-noetic-pinocchio \
     ros-noetic-gazebo-ros-control \
@@ -51,6 +52,7 @@ RUN sudo apt-get install -y \
     ros-noetic-nav-core \
     ros-noetic-costmap-2d \
     ros-noetic-navfn \
+    ros-noetic-global-planner \
     ros-noetic-base-local-planner \
     ros-noetic-dwa-local-planner \
     ros-noetic-rotate-recovery \

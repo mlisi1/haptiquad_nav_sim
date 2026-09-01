@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<launch>
+  <!-- Boots the ANYmal sim stack with an empty world (ground plane only, no
+       pre-placed objects) for haptiquad_nav_eval, which spawns/deletes a
+       single test object itself and resets it between trials.
+
+       This does NOT fork sim.launch's internals. It uses the existing
+       environment_config override point in load_robot_config.launch:
+       config/default.yaml still loads first as normal, then
+       configs/eval_empty_world.yaml overlays just the two world-file-path
+       params (rosparam load merges into the existing tree, it does not
+       replace it): see that file's own header comment. -->
+
+  <include file="$(find haptiquad_anymal_bringup)/launch/sim.launch">
+    <arg name="environment_data_package" value="haptiquad_anymal_bringup"/>
+    <arg name="environment_config"       value="eval_empty_world"/>
+  </include>
+</launch>
