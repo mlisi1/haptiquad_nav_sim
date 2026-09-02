@@ -106,3 +106,5 @@ Five cubes in a row along +X (robot starts at origin), 0.5×0.5×1.0 m each, 1.5
 ## Architecture Summary
 
 See `SYSTEM.md` for the full node/topic graph and `CLAUDE.md` for implementation details and pitfalls.
+
+See `EXPERIMENTS.md` for the unattended mass/friction sweep evaluation harness (`haptiquad_nav_eval`) — data logging, plot generation, and the ablation study between force- and displacement-based classification.

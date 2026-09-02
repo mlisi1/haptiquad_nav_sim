@@ -308,6 +308,61 @@ class PoseCache:
         return self.pose
 
 
+class GoalCompletionWatcher:
+    """Detects genuine goal-reached completion for
+    timing_sweep_orchestrator.py / timing_trial_logger.py -- NOT used by the
+    mass/mu sweep (StateWatcher below is unaffected and unchanged).
+
+    "Reached" is defined by ground-truth position (within goal_tolerance_m of
+    the commanded goal, continuously, for goal_settle_time seconds, while the
+    state machine is back in NORMAL_NAV) rather than by watching
+    /move_base/status for a terminal code: contact_probe_manager resends the
+    ORIGINAL goal as a brand-new actionlib goal every time it returns to
+    NORMAL_NAV (after CONTACT_PROBE/CLASSIFYING/BACKING_UP), and
+    /move_base/status only ever exposes whatever goal is currently tracked --
+    a naive "first terminal status seen after NORMAL_NAV" check races the
+    just-preempted probe/backup goal's own transient status update, which can
+    arrive before the resent goal's real result. Position-based detection
+    sidesteps that race entirely and measures what "reached the goal" means
+    physically, which is also the quantity the timing experiment actually
+    cares about.
+    """
+
+    def __init__(self, goal_tolerance_m, goal_settle_time):
+        from geometry_msgs.msg import PoseWithCovarianceStamped
+        self._tol2 = goal_tolerance_m ** 2
+        self._settle = goal_settle_time
+        self.state = None
+        self._goal = None              # (x, y), None until armed
+        self._within_tol_since = None
+        rospy.Subscriber('/haptiquad_nav/state', String, self._state_cb, queue_size=10)
+        rospy.Subscriber('/slam/pose', PoseWithCovarianceStamped, self._pose_cb, queue_size=1)
+
+    def arm(self, goal_x, goal_y):
+        """Call once per trial, right before/after sending that trial's goal."""
+        self._goal = (goal_x, goal_y)
+        self._within_tol_since = None
+
+    def _state_cb(self, msg):
+        self.state = msg.data
+
+    def _pose_cb(self, msg):
+        if self._goal is None:
+            return
+        p = msg.pose.pose.position
+        gx, gy = self._goal
+        d2 = (p.x - gx) ** 2 + (p.y - gy) ** 2
+        if d2 <= self._tol2 and self.state == 'NORMAL_NAV':
+            if self._within_tol_since is None:
+                self._within_tol_since = rospy.Time.now()
+        else:
+            self._within_tol_since = None
+
+    def reached(self):
+        return (self._within_tol_since is not None and
+                (rospy.Time.now() - self._within_tol_since).to_sec() >= self._settle)
+
+
 class StateWatcher:
     """Subscribes to /haptiquad_nav/state and exposes edge-detection flags
     used to bound a trial and detect the CONTACT_PROBE entry needed before

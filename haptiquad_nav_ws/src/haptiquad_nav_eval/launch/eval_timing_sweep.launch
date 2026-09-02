@@ -1,0 +1,30 @@
+<launch>
+  <!-- Runs the unattended lateral-length TIME-COMPARISON sweep (classical
+       circumvent vs. our probe-and-classify framework, movable and solid
+       arms) and logs one summary CSV row per trial.
+
+       Completely independent from eval_sweep.launch (the mass/mu
+       classification sweep): separate config, separate node names,
+       separate message type, separate results directory. Do not run both
+       launch files' orchestrators at the same time, they would fight over
+       the same robot/goal, even though the underlying nodes (contact_probe_manager,
+       move_base) are shared safely as long as only one sweep is active.
+
+       Requires:
+         1. haptiquad_anymal_bringup/launch/sim_eval.launch (empty world)
+            already running instead of the normal sim.launch.
+         2. haptiquad_nav's navigation.launch already running on top of it. -->
+
+  <rosparam file="$(find haptiquad_nav_eval)/config/timing_sweep.yaml" command="load"/>
+
+  <!-- Override the sweep's experiment tag / output location per run, e.g.:
+       roslaunch haptiquad_nav_eval eval_timing_sweep.launch tag:=timing_run_2026_09_01 -->
+  <arg name="tag" default=""/>
+  <param name="experiment_tag" value="$(arg tag)" if="$(eval tag != '')"/>
+
+  <node name="timing_trial_logger" pkg="haptiquad_nav_eval"
+        type="timing_trial_logger.py" output="screen"/>
+
+  <node name="timing_sweep_orchestrator" pkg="haptiquad_nav_eval"
+        type="timing_sweep_orchestrator.py" output="screen"/>
+</launch>

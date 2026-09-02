@@ -82,8 +82,10 @@ class SweepOrchestrator:
 
         results_dir = rospy.get_param('results_dir', _default_results_dir())
         self._tag_dir = os.path.join(results_dir, self._tag)
-        os.makedirs(self._tag_dir, exist_ok=True)
-        self._progress_path = os.path.join(self._tag_dir, 'progress.csv')
+        self._refuse_if_already_completed()  # before touching anything on disk
+        self._csv_dir = os.path.join(self._tag_dir, 'csv')
+        os.makedirs(self._csv_dir, exist_ok=True)
+        self._progress_path = os.path.join(self._csv_dir, 'progress.csv')
         self._done_ids = self._load_progress()
 
         self._trial_pub = rospy.Publisher('/haptiquad_nav_eval/trial_start',
@@ -95,9 +97,42 @@ class SweepOrchestrator:
         self._pose = PoseCache()
         self._state = StateWatcher()
 
+        self._snapshot_contact_probe_config()
+
         self._prev_object_name = None
         rospy.sleep(1.0)  # let subscribers/publishers connect
         self._run()
+
+    def _refuse_if_already_completed(self):
+        """A tag_dir whose plots/ already has content means a PRIOR run under
+        this tag finished completely (_generate_plots() only runs at the very
+        end of _run()) -- refuse to start rather than silently mixing a new
+        run's trials into it or clobbering its results. An incomplete run
+        (no plots yet, e.g. a crashed sweep) has no plots/ content and is
+        still resumed normally via progress.csv, as before."""
+        plots_dir = os.path.join(self._tag_dir, 'plots')
+        if os.path.isdir(plots_dir) and any(os.scandir(plots_dir)):
+            raise RuntimeError(
+                "[SweepOrchestrator] Refusing to run: '%s' already contains a "
+                "completed run (plots/ is non-empty). Pass a different "
+                "experiment_tag, or move/delete that directory if you really "
+                "want to redo it." % self._tag_dir)
+
+    def _snapshot_contact_probe_config(self):
+        """Save the live contact_probe_manager parameters actually in effect
+        for this run, so a results folder is self-documenting even if
+        contact_probe.yaml is edited again before anyone looks at it."""
+        path = os.path.join(self._tag_dir, 'contact_probe_manager_config.yaml')
+        try:
+            import yaml
+            params = rospy.get_param('/contact_probe_manager')
+        except Exception as e:
+            rospy.logwarn('[SweepOrchestrator] Could not snapshot contact_probe_manager '
+                          'config (is navigation.launch running?): %s', e)
+            return
+        with open(path, 'w') as f:
+            yaml.safe_dump(params, f, sort_keys=True)
+        rospy.loginfo('[SweepOrchestrator] Saved contact_probe_manager config to %s', path)
 
     # ── progress checkpointing ───────────────────────────────────────────────
 
@@ -139,7 +174,7 @@ class SweepOrchestrator:
         # sweep itself look like it failed -- the CSVs are already safely
         # on disk regardless. Re-run scripts/plot_results.py by hand any
         # time to retry.
-        if not os.path.exists(os.path.join(self._tag_dir, 'summary.csv')):
+        if not os.path.exists(os.path.join(self._csv_dir, 'summary.csv')):
             rospy.logwarn('[SweepOrchestrator] No summary.csv written -- skipping plots.')
             return
         try:

@@ -26,8 +26,8 @@ from haptiquad_nav_eval.plotting import generate_all
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('results_dir', help='Either a tag directory (contains summary.csv '
-                        'directly) or a results root (pass `tag` too, or use --tag).')
+    parser.add_argument('results_dir', help='Either a tag directory (contains a csv/ '
+                        'subfolder with summary.csv) or a results root (pass `tag` too).')
     parser.add_argument('tag', nargs='?', default=None,
                         help='If given, results_dir/tag is used as the tag directory.')
     parser.add_argument('--examples-per-label', type=int, default=2,
@@ -36,7 +36,7 @@ def main():
     args = parser.parse_args()
 
     tag_dir = os.path.join(args.results_dir, args.tag) if args.tag else args.results_dir
-    summary_path = os.path.join(tag_dir, 'summary.csv')
+    summary_path = os.path.join(tag_dir, 'csv', 'summary.csv')
     if not os.path.exists(summary_path):
         print('No summary.csv found at %s' % summary_path, file=sys.stderr)
         sys.exit(1)

@@ -48,13 +48,18 @@ this node to be RESTARTED after being updated for the new topics/fields to
 populate -- older rows/trials recorded before that restart will have NaN
 in these columns, which is expected, not a bug.
 
-Per trial, writes:
-  - <results_dir>/<tag>/trial_<id>_timeseries.csv — one row per
-    /anymal/base_wrench message received between CONTACT_PROBE entry and
-    the next NORMAL_NAV entry (native rate, zero-order-hold on the slower
-    topics: pose, state, speed_limit, diagnostics).
-  - <results_dir>/<tag>/summary.csv — one appended row per trial (pandas-
-    ready; header written once).
+Per trial, writes (CSVs live under <tag_dir>/csv/, not the tag root, so the
+tag directory's top level stays just csv/, plots/, plot_scripts/, and the
+contact_probe_manager config snapshot -- see sweep_orchestrator.py):
+  - <results_dir>/<tag>/csv/trial_<id>_timeseries.csv — one row per
+    /anymal/base_wrench message received from TrialStart (so it includes the
+    NORMAL_NAV/SLOW_APPROACH walk before any probing, not just
+    CONTACT_PROBE onward -- needed as a baseline reference, see
+    plot_stability_baseline in plotting.py) through the next NORMAL_NAV
+    entry (native rate, zero-order-hold on the slower topics: pose, state,
+    speed_limit, diagnostics).
+  - <results_dir>/<tag>/csv/summary.csv — one appended row per trial
+    (pandas-ready; header written once).
 
 A per-trial watchdog timer guarantees exactly one summary row is written
 per TrialStart message even if the state machine never reaches
@@ -105,7 +110,7 @@ SUMMARY_FIELDS = [
     't_contact_onset', 't_classify_entry', 't_classify_exit',
     'delta_d_classify_window',
     'peak_fx', 'peak_fy', 'peak_fz', 'peak_tx', 'peak_ty', 'peak_tz',
-    'classified_label', 'end_reason',
+    'classified_label', 'classification_mode', 'end_reason',
     't_goal_sent', 'nav_time_to_classification',
     'nav_status_at_finish', 'nav_status_at_finish_text',
     # Stability / safety -- see module docstring's "Safety/stability data" note.
@@ -135,9 +140,19 @@ class TrialLogger:
 
     def __init__(self):
         self._results_dir = rospy.get_param('results_dir', _default_results_dir())
-        # Same param contact_probe_manager itself loads from contact_probe.yaml --
-        # read here, not duplicated, so it can't silently drift out of sync.
-        self._contact_hold_time = rospy.get_param('contact_hold_time', 1.0)
+        # contact_hold_time/classification_mode live in contact_probe.yaml, which
+        # is loaded into contact_probe_manager's PRIVATE namespace by navigation.launch
+        # (a separate launch file from this node's own eval_sweep.launch) -- so they
+        # must be read via contact_probe_manager's absolute param path, not a bare
+        # name (a bare name here would resolve to /contact_hold_time, which nothing
+        # ever sets, and silently fall back to the Python default below).
+        self._contact_hold_time = rospy.get_param(
+            '/contact_probe_manager/contact_hold_time', 1.0)
+        # Ablation toggle -- recorded per row so a results folder produced with
+        # classification_mode=force can't be silently mistaken for displacement
+        # mode (or vice versa) during offline analysis.
+        self._classification_mode = rospy.get_param(
+            '/contact_probe_manager/classification_mode', 'force')
         # Watchdog must exceed the orchestrator's own trial_timeout so a clean
         # state-driven finish always wins the race under normal conditions.
         self._watchdog_s = rospy.get_param('trial_timeout', 60.0) + 15.0
@@ -288,7 +303,13 @@ class TrialLogger:
             self._finish_trial(prev_state_at_exit=self._state, end_reason='superseded')
 
         self._trial = msg
-        self._recording = False
+        # Recording starts at TrialStart, not CONTACT_PROBE entry, so the
+        # NORMAL_NAV (and SLOW_APPROACH) walk before any probing is captured
+        # too -- this is the only way to get a genuine "normal gait" baseline
+        # to compare contact-phase stability against (see plot_stability_baseline
+        # in plotting.py). t_since_probe_entry is NaN for these pre-probe rows
+        # since _t_probe_entry isn't set until CONTACT_PROBE is actually entered.
+        self._recording = True
         self._finished_current = False
         self._rows = []
         self._probe_entry_pos = None
@@ -427,9 +448,10 @@ class TrialLogger:
 
         trial = self._trial
         tag_dir = os.path.join(self._results_dir, trial.experiment_tag)
-        os.makedirs(tag_dir, exist_ok=True)
+        csv_dir = os.path.join(tag_dir, 'csv')
+        os.makedirs(csv_dir, exist_ok=True)
 
-        ts_path = os.path.join(tag_dir, 'trial_%05d_timeseries.csv' % trial.trial_id)
+        ts_path = os.path.join(csv_dir, 'trial_%05d_timeseries.csv' % trial.trial_id)
         with open(ts_path, 'w', newline='') as f:
             w = csv.DictWriter(f, fieldnames=TIME_SERIES_FIELDS)
             w.writeheader()
@@ -483,6 +505,7 @@ class TrialLogger:
             'peak_fx': self._peak['fx'], 'peak_fy': self._peak['fy'], 'peak_fz': self._peak['fz'],
             'peak_tx': self._peak['tx'], 'peak_ty': self._peak['ty'], 'peak_tz': self._peak['tz'],
             'classified_label': classified_label,
+            'classification_mode': self._classification_mode,
             'end_reason': end_reason,
             't_goal_sent': t_goal_sent,
             'nav_time_to_classification': t_finish - t_goal_sent,
@@ -507,7 +530,7 @@ class TrialLogger:
             'timeseries_csv_path': ts_path,
         }
 
-        summary_path = os.path.join(tag_dir, 'summary.csv')
+        summary_path = os.path.join(csv_dir, 'summary.csv')
         new_file = not os.path.exists(summary_path)
         with open(summary_path, 'a', newline='') as f:
             w = csv.DictWriter(f, fieldnames=SUMMARY_FIELDS)

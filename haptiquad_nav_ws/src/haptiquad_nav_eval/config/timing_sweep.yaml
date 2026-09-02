@@ -1,0 +1,92 @@
+# timing_sweep.yaml — shared params for the HaptiQuad-Nav TIME-COMPARISON
+# harness (timing_sweep_orchestrator.py / timing_trial_logger.py).
+#
+# Completely independent from sweep.yaml (the mass/mu classification sweep):
+# separate config file, separate launch file, separate orchestrator/logger
+# nodes, separate message type (TimingTrialStart, not TrialStart), separate
+# results directory. Loaded GLOBALLY (no namespace) by eval_timing_sweep.launch,
+# same pattern as sweep.yaml.
+#
+# Question under test: as the obstacle's LATERAL length grows (relative to
+# the robot), does tactile-probe navigation (push through if movable, replan
+# if solid) end up faster or slower than classical circumvent-everything
+# navigation? mass/mu are held FIXED at two representative points confirmed
+# well inside each class by the mass/mu sweep -- length is the only swept
+# variable here.
+
+experiment_tag: "timing_sweep_01"
+
+# ── Fixed object properties ──────────────────────────────────────────────
+# size_y (lateral length, perpendicular to the approach direction) is the
+# swept variable below. size_x (depth, along the approach direction) is held
+# at the same 0.5m used throughout the test worlds -- matches
+# contact_probe.yaml's obstacle_assumed_depth default, so the SOLID arm's
+# rectangle-mark depth assumption stays valid across the sweep.
+geometry: box
+size_x: 0.5
+size_z: 1.0
+
+# Swept variable: lateral length (m). Range chosen relative to robot/costmap
+# geometry (footprint half-width 0.25m, inflation_radius 0.80m) so any
+# crossover between "faster to push" and "faster to circumvent" falls inside
+# the tested range rather than off one end.
+lengths_m: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+
+# Mass/mu for the MOVABLE arm -- matches movable_box_* in
+# mixed_obstacles_test.world / cube_light_* in contact_classification_test.world,
+# both confirmed MOVABLE across the whole mass/mu sweep.
+movable_mass_kg: 5.0
+movable_mu: 0.1
+
+# Mass/mu for the SOLID arm (and reused for the CLASSICAL arm's object, even
+# though probing is bypassed for it -- if the bypass ever failed for any
+# reason, a heavy/high-friction object won't get shoved out of position and
+# quietly invalidate the trial). Matches solid_box_*/cube_heavy_* in the test
+# worlds, confirmed SOLID across the whole mass/mu sweep.
+solid_mass_kg: 200.0
+solid_mu: 0.8
+
+# ── Approach / goal geometry ──────────────────────────────────────────────
+# Same meaning and defaults as sweep.yaml. approach_angle/approach_offset are
+# fixed at 0 (not swept) for this experiment: size_y is only "lateral length"
+# when the box is axis-aligned with a head-on approach (spawned at yaw=0,
+# see ObjectSpawner.spawn's default).
+approach_distance: 3.0
+# Raised from 1.5m -- at 1.5m the robot ends up parked right on top of the
+# obstacle (classical: just outside the inflation boundary; movable: right
+# where it stopped pushing) instead of clearly past it. Also feeds
+# _movable_excl_radius()'s floor (goal_overshoot + margin), so a larger value
+# here gives more headroom against the movable-arm re-trigger issue too.
+goal_overshoot: 3.0
+settle_time: 1.0
+reset_settle_time: 1.5
+
+# ── Goal-reached detection (GoalCompletionWatcher in trial_core.py) ───────
+# Deliberately looser than haptiquad_nav_planner.yaml's own xy_goal_tolerance
+# (0.15m) -- this only needs to confidently confirm the robot arrived, not
+# duplicate move_base's own success criterion. goal_settle_time guards
+# against a single noisy pose sample right at the tolerance boundary.
+goal_tolerance_m: 0.30
+goal_settle_time: 1.0
+
+# ── Timeouts (safety nets; a trial is never silently dropped) ────────────
+# Longer than sweep.yaml's: these trials run through classification AND the
+# full circumvent/backup maneuver to the actual goal, not just to
+# classification resolution.
+no_contact_timeout: 25.0    # [s] movable/solid arms only -- give up waiting for CONTACT_PROBE entry
+trial_timeout: 180.0        # [s] overall per-trial safety net, all arms
+
+repeats: 3                  # repeats per (length, arm) cell
+
+# Margin added to (length / 2) when scaling contact_probe_manager's
+# exclusion/refine radii to this trial's object (see
+# timing_sweep_orchestrator.py's _scale_radii). Must be generous enough that
+# the circular/point approximations contact_probe_manager uses internally
+# still comfortably cover a box this long; too small risks spurious
+# re-triggering (movable/solid arms) or an under-sized solid costmap mark.
+excl_radius_margin_m: 0.3
+
+# Where CSVs are written. Defaults to <this package>/.results/<tag> (same
+# gitignored, host-visible folder the mass/mu sweep uses) under its own tag,
+# so the two experiments' results never collide even if run back-to-back.
+# results_dir: "/home/anydev/haptiquad_eval_results"

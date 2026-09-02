@@ -24,6 +24,7 @@ catkin_python_setup()
 add_message_files(
   FILES
   TrialStart.msg
+  TimingTrialStart.msg
 )
 
 generate_messages(
@@ -39,6 +40,9 @@ catkin_install_python(PROGRAMS
   scripts/sweep_orchestrator.py
   scripts/trial_logger.py
   scripts/plot_results.py
+  scripts/timing_sweep_orchestrator.py
+  scripts/timing_trial_logger.py
+  scripts/plot_timing_results.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
