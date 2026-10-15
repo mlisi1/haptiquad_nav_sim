@@ -50,6 +50,15 @@ Plus:
                                  probe-to-decision time; the CSV ranks them
                                  (most accurate first, then fastest). This is
                                  the table to pick the final parameters from.
+  solid_accuracy_interactions.png
+                              — SOLID-arm accuracy heatmaps: probe_speed x
+                                 contact_hold_time, then classify_time x
+                                 contact_hold_time per probe_speed (the
+                                 interactions the main-effect curves hide).
+  accuracy_vs_contact_latency.png / .csv
+                              — SOLID accuracy vs. contact-onset -> decision
+                                 latency per (speed, hold, classify, settle)
+                                 cell, current yaml vs. selected marked.
 And one whole-sweep sanity check:
   diagnostics_over_sweep.png  — loop rate / wrench latency vs. trial_id, to
                                  confirm contact_probe_manager stayed healthy
@@ -152,6 +161,34 @@ def default_config():
         'xlabel': 'mean time PROBE-entry to DECISION (s)',
         'ylabel': 'fraction correctly classified (both arms)',
         'title': 'Parameter combinations: accuracy vs. classification time',
+    }
+    cfg['solid_accuracy_interactions'] = {
+        'figsize': [15, 4.5],
+        'dpi': 150,
+        'cmap': 'RdYlGn',
+        'title': 'SOLID-arm accuracy (fraction classified SOLID); cell text = accuracy / n trials',
+    }
+    cfg['accuracy_vs_contact_latency'] = {
+        'figsize': [8, 6],
+        'dpi': 150,
+        # The parameters that barely matter (probe_distance,
+        # wrench_filter_window) are pooled, so each point is one
+        # (probe_speed, contact_hold_time, classify_time, settle_time) cell.
+        'group_params': ['probe_speed', 'contact_hold_time', 'classify_time',
+                         'classification_force_settle_time'],
+        # Highlighted points: {label: {param: value, ...}} over group_params.
+        'highlight': {
+            'baseline (0.3/1.0/0.6/0.2)': {'probe_speed': 0.3, 'contact_hold_time': 1.0,
+                                           'classify_time': 0.6,
+                                           'classification_force_settle_time': 0.2},
+            'selected (0.4/0.4/0.6/0.2)': {'probe_speed': 0.4, 'contact_hold_time': 0.4,
+                                           'classify_time': 0.6,
+                                           'classification_force_settle_time': 0.2},
+        },
+        'xlabel': 'median time CONTACT-onset to DECISION, correct trials (s)',
+        'ylabel': 'SOLID-arm accuracy',
+        'title': 'Safety vs. latency per parameter cell\n'
+                 '(probe_distance and wrench_filter_window pooled)',
     }
     cfg['diagnostics_over_sweep'] = {
         'figsize': [8, 6],
@@ -345,6 +382,98 @@ def plot_combo_ranking(df, out_path, cfg):
     plt.close(fig)
 
 
+def _heatmap(ax, d, row, col, cmap):
+    """Solid accuracy over (row, col), cell text = accuracy / n."""
+    acc = d.pivot_table('correct', row, col, aggfunc='mean').sort_index()
+    n = d.pivot_table('correct', row, col, aggfunc='size').reindex_like(acc)
+    im = ax.imshow(acc.values, cmap=cmap, vmin=0.5, vmax=1.0, aspect='auto', origin='lower')
+    for i in range(acc.shape[0]):
+        for j in range(acc.shape[1]):
+            if not np.isnan(acc.values[i, j]):
+                ax.text(j, i, '%.2f\n%d' % (acc.values[i, j], n.values[i, j]),
+                        ha='center', va='center', fontsize=8)
+    ax.set_xticks(range(acc.shape[1]))
+    ax.set_xticklabels(['%g' % v for v in acc.columns])
+    ax.set_yticks(range(acc.shape[0]))
+    ax.set_yticklabels(['%g' % v for v in acc.index])
+    ax.set_xlabel(PARAM_LABELS.get(col, col))
+    ax.set_ylabel(PARAM_LABELS.get(row, row))
+    return im
+
+
+def plot_solid_accuracy_interactions(df, out_path, cfg):
+    """The main-effect curves in time_vs_<param> average over every other
+    parameter; SOLID misclassification (the unsafe direction -- the movable
+    arm is ~100% everywhere) is an interaction, chiefly probe_speed x
+    contact_hold_time. Panel 1: speed x hold; then one hold x classify_time
+    panel per probe_speed."""
+    d = df[df['trial_mode'] == 'solid'].assign(
+        correct=lambda x: (x['classified_label'] == 'SOLID').astype(float))
+    if d.empty:
+        raise ValueError('no solid rows')
+    speeds = sorted(d['probe_speed'].dropna().unique())
+    fig, axes = plt.subplots(1, 1 + len(speeds), figsize=cfg.get('figsize', [15, 4.5]),
+                             gridspec_kw={'wspace': 0.35})
+    cmap = cfg.get('cmap', 'RdYlGn')
+    im = _heatmap(axes[0], d, 'probe_speed', 'contact_hold_time', cmap)
+    axes[0].set_title('all classify/settle values', fontsize=9)
+    for ax, s in zip(axes[1:], speeds):
+        _heatmap(ax, d[d['probe_speed'] == s], 'classify_time', 'contact_hold_time', cmap)
+        ax.set_title('probe_speed = %g m/s' % s, fontsize=9)
+    fig.colorbar(im, ax=list(axes), shrink=0.8)
+    fig.suptitle(cfg.get('title', ''))
+    fig.savefig(out_path, dpi=cfg.get('dpi', 150), bbox_inches='tight')
+    plt.close(fig)
+
+
+def plot_accuracy_vs_contact_latency(df, out_path, cfg):
+    """SOLID accuracy vs. contact-onset -> decision latency (~ hold +
+    classify window) per parameter cell, with the configured highlight
+    cells (current yaml vs. selected) marked. Contact-onset rather than
+    probe-entry: probe-entry -> decision is dominated by approach / push
+    travel (bimodal, ~1 s vs ~7-8 s), not by these parameters. Writes the
+    table next to the plot as accuracy_vs_contact_latency.csv."""
+    keys = cfg.get('group_params', ['probe_speed', 'contact_hold_time', 'classify_time',
+                                    'classification_force_settle_time'])
+    d = df.assign(correct=df['classified_label'] == df['trial_mode'].map(_expected_label),
+                  latency=df['t_classify_exit'] - df['t_contact_onset'])
+    rows = []
+    for vals, g in d.groupby(keys):
+        solid = g[g['trial_mode'] == 'solid']
+        ok = g[g['correct']]
+        rows.append(dict(zip(keys, vals), n=len(g), n_solid=len(solid),
+                         solid_accuracy=solid['correct'].mean(),
+                         movable_accuracy=g[g['trial_mode'] == 'movable']['correct'].mean(),
+                         latency_median_s=ok['latency'].median(),
+                         latency_max_s=ok['latency'].max()))
+    agg = pd.DataFrame(rows).sort_values(['solid_accuracy', 'latency_median_s'],
+                                         ascending=[False, True])
+    agg.to_csv(os.path.splitext(out_path)[0] + '.csv', index=False)
+
+    fig, ax = plt.subplots(figsize=cfg.get('figsize', [8, 6]))
+    speeds = sorted(agg['probe_speed'].unique())
+    for s, c in zip(speeds, plt.cm.viridis(np.linspace(0, 0.85, len(speeds)))):
+        sub = agg[agg['probe_speed'] == s]
+        ax.scatter(sub['latency_median_s'], sub['solid_accuracy'], s=22, alpha=0.7,
+                   color=c, label='probe_speed %g' % s)
+    for (label, sel), m in zip(cfg.get('highlight', {}).items(), ['s', '*']):
+        mask = np.logical_and.reduce([np.isclose(agg[k], v) for k, v in sel.items()])
+        hit = agg[mask]
+        if not hit.empty:
+            ax.scatter(hit['latency_median_s'], hit['solid_accuracy'], s=220, marker=m,
+                       facecolors='none', edgecolors='k', linewidths=1.5,
+                       label='%s: %.2f, %.2f s' % (label, hit['solid_accuracy'].iloc[0],
+                                                   hit['latency_median_s'].iloc[0]))
+    ax.set_xlabel(cfg.get('xlabel', ''))
+    ax.set_ylabel(cfg.get('ylabel', ''))
+    ax.set_title(cfg.get('title', ''), fontsize=10)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=8, loc='lower right')
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=cfg.get('dpi', 150))
+    plt.close(fig)
+
+
 def plot_diagnostics_over_sweep(df, out_path, cfg):
     """Whole-sweep sanity check: did contact_probe_manager's loop rate /
     wrench latency stay stable trial to trial, independent of which
@@ -436,6 +565,8 @@ def generate_all(tag_dir):
         written.append(os.path.join(plots_dir, 'combo_ranking.png'))
     except Exception as e:
         errors.append(('combo_ranking.png', e))
+    _run('solid_accuracy_interactions.png', plot_solid_accuracy_interactions)
+    _run('accuracy_vs_contact_latency.png', plot_accuracy_vs_contact_latency)
     _run('diagnostics_over_sweep.png', plot_diagnostics_over_sweep)
 
     bundle_scripts(tag_dir, [_THIS_FILE, _PLOT_CONFIG_FILE], _REGENERATE_SCRIPT)
