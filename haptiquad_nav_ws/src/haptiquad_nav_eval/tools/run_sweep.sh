@@ -81,7 +81,7 @@ if [[ "${1:-}" == "--inner" ]]; then
     done
     log "TIMEOUT waiting for $what"; return 1
   }
-  init_done() { ! rosnode list 2>/dev/null | grep -q '^/anymal_motion_init$'; }
+  init_done() { [[ $(rosparam get /haptiquad_nav/motion_initialized 2>/dev/null) == [Tt]rue ]]; }
 
   start roscore roscore -p $ROS_PORT
   wait_for 60 roscore rosparam list || exit 3
@@ -91,12 +91,14 @@ if [[ "${1:-}" == "--inner" ]]; then
   wait_for 240 /gazebo/reset_world rosservice info /gazebo/reset_world \
     && wait_for 240 /state_estimator/reset rosservice info /state_estimator/reset || exit 3
 
-  start nav roslaunch haptiquad_nav navigation.launch rviz:=false init_robot:=true
+  # nav_supervisor starts the navigation core only after walk mode and its
+  # preflight checks pass, so wait for those first.
+  start nav roslaunch haptiquad_nav navigation.launch platform:=sim use_sim_time:=true \
+    eval_mode:=true init_robot:=true rviz:=false
   nav_pid=${pids[-1]}
-  wait_for 120 contact_probe_manager rosservice info /contact_probe_manager/reset \
-    && wait_for 120 move_base rosservice info /move_base/clear_costmaps || exit 3
-  sleep 5   # let anymal_motion_init register before polling for its exit
   wait_for 120 "e-stop clear + walk mode" init_done || exit 3
+  wait_for 240 contact_probe_manager rosservice info /contact_probe_manager/reset \
+    && wait_for 120 move_base rosservice info /move_base/clear_costmaps || exit 3
   sleep 5
 
   start eval roslaunch haptiquad_nav_eval "$launch_file" tag:="$tag"
