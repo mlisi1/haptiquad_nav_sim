@@ -115,6 +115,9 @@ class TimingSweepOrchestrator:
         self._refuse_if_already_completed()
         self._csv_dir = os.path.join(self._tag_dir, 'csv')
         os.makedirs(self._csv_dir, exist_ok=True)
+        # Trial count for tools/sweep_status.py's progress/ETA.
+        with open(os.path.join(self._tag_dir, 'TOTAL'), 'w') as f:
+            f.write('%d\n' % len(self._combos))
         self._progress_path = os.path.join(self._csv_dir, 'progress.csv')
         self._done_ids = self._load_progress()
 
@@ -211,8 +214,16 @@ class TimingSweepOrchestrator:
             rospy.loginfo('[TimingSweep] Resumed: skipped %d already-completed trials.',
                           n_skipped)
         rospy.loginfo('[TimingSweep] Sweep complete (%d trials).', len(self._combos))
+        if rospy.is_shutdown():
+            # Interrupted, not finished: generating plots here would make
+            # _refuse_if_already_completed() block the resume.
+            return
         self._rtf.restore()
         self._generate_plots()
+        # Completion marker for scripts/run_sweep.sh, which can't otherwise
+        # tell a finished sweep from one whose stack died mid-run.
+        with open(os.path.join(self._tag_dir, 'DONE'), 'w') as f:
+            f.write('%d\n' % len(self._combos))
 
     def _generate_plots(self):
         if not os.path.exists(os.path.join(self._csv_dir, 'summary.csv')):

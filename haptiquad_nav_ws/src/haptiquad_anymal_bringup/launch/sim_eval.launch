@@ -34,4 +34,10 @@
 
   <param name="/stack_launcher/stacks/user_interface/nodes/rviz/enabled"
          value="false" type="bool" unless="$(arg rviz)"/>
+  <!-- Never wanted for the eval harness; already off in default.yaml, forced
+       here so tools/run_sweep.sh can rely on no window ever opening. -->
+  <param name="/stack_launcher/stacks/user_interface/nodes/rqt_gui/enabled"
+         value="false" type="bool" unless="$(arg rviz)"/>
+  <param name="/stack_launcher/stacks/simulation_environment/nodes/gazebo_gui/enabled"
+         value="false" type="bool"/>
 </launch>

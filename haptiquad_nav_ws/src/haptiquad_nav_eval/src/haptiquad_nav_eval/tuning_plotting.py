@@ -21,14 +21,12 @@ also bundles this module + plot_config.py + a tiny standalone runner into
 <tag_dir>/plot_scripts/, so the results folder is self-contained -- see
 plotting.py's module docstring for the full rationale, identical here.
 
-Design note -- "vs param" plots use the WHOLE summary.csv, not just the rows
-where a given parameter was the one being swept: tuning_sweep_orchestrator.py
-runs a one-parameter-at-a-time (OFAT) design, so on every trial where
-`param` was NOT being swept, it was still published at its baseline value
-(never left unset) -- those rows are valid, if repeated, samples at that x.
-Grouping directly on the column across every row therefore pools "the
-entirety of the sweep" into each curve, exactly as intended, rather than
-needlessly discarding most of the data for each individual plot.
+Design note -- tuning_sweep_orchestrator.py runs a FULL FACTORIAL design,
+so each "vs param" curve groups on that parameter's column across every row,
+i.e. averages over all combinations of the other parameters: the main effect
+of that parameter in a balanced design. (Older one-at-a-time sweeps, e.g.
+tuning_sweep_01, also plot correctly this way, since every row logged every
+parameter's actual value.) Interactions are what combo_ranking is for.
 
 For each of the six tunable contact-probe parameters, two files:
   time_vs_<param>.png         — the metric this sweep chiefly exists to
@@ -46,7 +44,13 @@ For each of the six tunable contact-probe parameters, two files:
                                  wrench_filter_window, but shown for every
                                  parameter in case of cross-effects) vs. that
                                  parameter's value.
-Plus one whole-sweep sanity check:
+Plus:
+  combo_ranking.png / .csv    — every parameter combination's accuracy (over
+                                 both arms and all repeats) vs. its mean
+                                 probe-to-decision time; the CSV ranks them
+                                 (most accurate first, then fastest). This is
+                                 the table to pick the final parameters from.
+And one whole-sweep sanity check:
   diagnostics_over_sweep.png  — loop rate / wrench latency vs. trial_id, to
                                  confirm contact_probe_manager stayed healthy
                                  across the whole run.
@@ -139,6 +143,16 @@ def default_config():
             'legend_fontsize': 8,
             'colors': {},
         }
+    cfg['combo_ranking'] = {
+        'figsize': [8, 6],
+        'dpi': 150,
+        'top_n': 10,                 # highlighted in the plot
+        'point_color': 'tab:gray',
+        'top_color': 'tab:blue',
+        'xlabel': 'mean time PROBE-entry to DECISION (s)',
+        'ylabel': 'fraction correctly classified (both arms)',
+        'title': 'Parameter combinations: accuracy vs. classification time',
+    }
     cfg['diagnostics_over_sweep'] = {
         'figsize': [8, 6],
         'dpi': 150,
@@ -156,6 +170,9 @@ def _load_summary(tag_dir, config=None):
     df = pd.read_csv(path)
     n_before = len(df)
     df = df[df['end_reason'] != 'superseded']  # forced-close artifacts, not real trials
+    # A trial interrupted by a stack restart (run_sweep.sh) is re-run on
+    # resume and can be logged twice; the later row is the complete one.
+    df = df.drop_duplicates('trial_id', keep='last')
     # sim_anomaly (SimHealthMonitor, trial_core.py): a Gazebo physics
     # explosion/teleport, tip-over, out-of-range height, or a stall was
     # detected during the trial. Older summary.csv files predate this
@@ -290,6 +307,44 @@ def plot_diagnostics_vs_param(df, param, out_path, cfg):
     plt.close(fig)
 
 
+def plot_combo_ranking(df, out_path, cfg):
+    """One point per combo_id; writes the ranking next to the plot as
+    combo_ranking.csv. Needs a full-factorial summary (combo_id column).
+    Called with superseded rows KEPT (see generate_all): a trial the
+    orchestrator gave up on because contact never happened is logged as
+    superseded/INCOMPLETE and must count against its combination."""
+    if 'combo_id' not in df.columns:
+        raise ValueError('no combo_id column (not a full-factorial tuning sweep)')
+    d = df.assign(correct=df['classified_label'] == df['trial_mode'].map(_expected_label))
+    agg = d.groupby('combo_id').agg(
+        n=('trial_id', 'size'),
+        accuracy=('correct', 'mean'),
+        incomplete=('classified_label', lambda s: int((s == 'INCOMPLETE').sum())),
+        mean_time_s=('t_probe_to_classify_exit_s', 'mean'),
+        max_time_s=('t_probe_to_classify_exit_s', 'max'),
+        **{p: (p, 'first') for p in SWEEP_PARAMS})
+    agg = agg.sort_values(['accuracy', 'mean_time_s'], ascending=[False, True])
+    agg.to_csv(os.path.splitext(out_path)[0] + '.csv')
+
+    top = agg.head(cfg.get('top_n', 10))
+    fig, ax = plt.subplots(figsize=cfg.get('figsize', [8, 6]))
+    ax.scatter(agg['mean_time_s'], agg['accuracy'], s=14, alpha=0.5,
+               color=cfg.get('point_color', 'tab:gray'), label='combination')
+    ax.scatter(top['mean_time_s'], top['accuracy'], s=30,
+               color=cfg.get('top_color', 'tab:blue'), label='top %d' % len(top))
+    for cid, row in top.iterrows():
+        ax.annotate(str(cid), (row['mean_time_s'], row['accuracy']),
+                    fontsize=7, xytext=(3, 3), textcoords='offset points')
+    ax.set_xlabel(cfg.get('xlabel', ''))
+    ax.set_ylabel(cfg.get('ylabel', ''))
+    ax.set_title(cfg.get('title', ''))
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=8)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=cfg.get('dpi', 150))
+    plt.close(fig)
+
+
 def plot_diagnostics_over_sweep(df, out_path, cfg):
     """Whole-sweep sanity check: did contact_probe_manager's loop rate /
     wrench latency stay stable trial to trial, independent of which
@@ -371,6 +426,16 @@ def generate_all(tag_dir):
     for param in SWEEP_PARAMS:
         _run('time_vs_%s.png' % param, plot_time_vs_param, param)
         _run('diagnostics_vs_%s.png' % param, plot_diagnostics_vs_param, param)
+    raw = pd.read_csv(os.path.join(tag_dir, 'csv', 'summary.csv'))
+    raw = raw.drop_duplicates('trial_id', keep='last')
+    if 'sim_anomaly' in raw.columns:
+        raw = raw[raw['sim_anomaly'].fillna('') == '']
+    try:
+        plot_combo_ranking(raw, os.path.join(plots_dir, 'combo_ranking.png'),
+                           config['combo_ranking'])
+        written.append(os.path.join(plots_dir, 'combo_ranking.png'))
+    except Exception as e:
+        errors.append(('combo_ranking.png', e))
     _run('diagnostics_over_sweep.png', plot_diagnostics_over_sweep)
 
     bundle_scripts(tag_dir, [_THIS_FILE, _PLOT_CONFIG_FILE], _REGENERATE_SCRIPT)

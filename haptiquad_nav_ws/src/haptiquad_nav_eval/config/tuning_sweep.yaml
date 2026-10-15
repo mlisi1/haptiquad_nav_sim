@@ -11,15 +11,15 @@
 # long classification takes, and at what cost to correctness? Object mass/mu
 # and geometry are held FIXED at two representative points (one confirmed
 # MOVABLE, one confirmed SOLID by the mass/mu sweep) -- only contact-probe
-# parameters that can influence classification TIME are swept, one at a
-# time (all others held at baseline). Force thresholds (contact_force_
+# parameters that can influence classification TIME are swept, in a full
+# factorial design. Force thresholds (contact_force_
 # threshold_n, classification_force_threshold_n) and map/costmap parameters
 # (solid/movable exclusion radii, backup geometry, obstacle_assumed_depth,
 # etc.) are deliberately NOT included here -- they affect correctness or
 # downstream navigation, not classification time, and the mass/mu sweep
 # already covers them.
 
-experiment_tag: "tuning_sweep_01"
+experiment_tag: "tuning_sweep_02"
 
 # ── Fixed object (single size, NOT swept -- this experiment is about
 # contact-probe timing parameters, not obstacle geometry) ──────────────────
@@ -44,24 +44,23 @@ goal_overshoot: 1.5     # only needs to be a valid point past the obstacle for
 settle_time: 1.0
 reset_settle_time: 1.5
 
-# ── Baseline values (contact_probe.yaml's own defaults) ────────────────────
-# Whichever parameter is NOT being swept in a given trial is held at its
-# baseline value below -- always published explicitly every trial (never
-# left over from a previous trial), same discipline as
-# timing_sweep_orchestrator.py's radius overrides.
-baseline:
-  probe_speed: 0.30
-  probe_distance: 0.65
-  contact_hold_time: 1.0
-  classify_time: 0.6
-  classification_force_settle_time: 0.2
-  wrench_filter_window: 50
-
-# ── Swept grids, one parameter at a time (OFAT design) ─────────────────────
+# ── Full-factorial grid ────────────────────────────────────────────────────
+# EVERY combination of the values below is run (tuning_sweep_01 was
+# one-at-a-time, which misses interactions -- e.g. a short contact_hold_time
+# may only be safe with a large wrench_filter_window). The grid size
+# multiplies, so each list is kept short, using what tuning_sweep_01 showed:
+#   - wrench_filter_window and probe_distance barely moved timing or
+#     accuracy -> 2 values each.
+#   - probe_distance <= 0.55 never triggers (nearest return is always >
+#     cloud_range_min 0.55m); must also stay < slow_approach_distance (0.7m).
+#   - contact_hold_time is the biggest time lever and the one that starts
+#     accepting gait noise when short -> 4 values.
+#   - classification_force_settle_time must leave >= min_settled_window_s
+#     of the classify_time window to average over; violating combinations
+#     are skipped (none with the grids below).
+# 3 x 2 x 4 x 3 x 3 x 2 = 432 combinations x 2 arms x repeats.
 # sweep_params fixes the iteration order (a loaded rosparam dict's key order
-# is not guaranteed). For each entry, EVERY value in its param_grids list
-# below is tried while every OTHER parameter stays at its baseline value
-# above.
+# is not guaranteed).
 sweep_params:
   - probe_speed
   - probe_distance
@@ -71,33 +70,20 @@ sweep_params:
   - wrench_filter_window
 
 param_grids:
-  # [m/s]. contact_probe.yaml documents 0.1 m/s as too slow to push 5kg/
-  # mu=0.05 boxes -- floor kept comfortably above that. Upper end explores
-  # whether a harder impact destabilizes the robot (watch peak_roll_deg/
-  # peak_pitch_deg in summary.csv) before it saves meaningful time.
-  probe_speed: [0.15, 0.20, 0.30]
-  # [m]. Must stay > cloud_range_min (0.55m, contact_probe.yaml) and below
-  # slow_approach_distance (0.7m) so SLOW_APPROACH -> CONTACT_PROBE still
-  # makes sense.
-  probe_distance: [0.5, 0.55, 0.6, 0.65, 0.7]
-  # [s]. Exists to reject gait noise (~5-8N floor vs. the 12N
-  # contact_force_threshold_n) -- values well below baseline are expected to eventually
-  # start accepting noise as contact; that failure point is exactly what
-  # this sweep should reveal (watch classified_label/end_reason at the low
-  # end).
-  contact_hold_time: [0.2, 0.4, 0.6, 1.0, 1.5]
-  # [s]. Must exceed classification_force_settle_time's baseline (0.2s)
-  # with some margin left over for averaging.
-  classify_time: [0.3, 0.45, 0.6, 0.9, 1.2]
-  # [s]. Must stay below classify_time's baseline (0.6s). Exists to skip
-  # the initial impact/breakaway transient -- values near 0 are expected to
-  # start contaminating the settled-force reading with that transient.
-  classification_force_settle_time: [0.05, 0.1, 0.2, 0.3, 0.45]
-  # [samples, ~400Hz wrench publish rate]. Trades gait-noise rejection
-  # against detection latency -- 50 samples ~= 125ms.
-  wrench_filter_window: [10, 25, 50, 100, 200]
+  probe_speed: [0.20, 0.30, 0.40]                      # [m/s]
+  probe_distance: [0.60, 0.65]                         # [m]
+  contact_hold_time: [0.2, 0.4, 0.6, 1.0]              # [s]
+  classify_time: [0.45, 0.6, 0.9]                      # [s]
+  classification_force_settle_time: [0.1, 0.2, 0.3]   # [s]
+  wrench_filter_window: [25, 50]                       # [samples]
 
-repeats: 3   # repeats per (param, value, arm) cell
+min_settled_window_s: 0.15   # [s] classify_time - settle_time lower bound
+
+# 432 x 2 arms x 2 = 1728 trials (~7h at the ~15s/trial seen so far). Every
+# combination gets 4 trials (2 per arm); each "vs param" main-effect point
+# pools hundreds. Re-run the best few combinations from combo_ranking.csv
+# with more repeats before committing to one.
+repeats: 2
 
 # ── Trial end condition ────────────────────────────────────────────────────
 # Deliberately different from BOTH other sweeps: this trial ends the INSTANT

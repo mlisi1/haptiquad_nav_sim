@@ -35,19 +35,14 @@ float64 robot_origin_x      # map frame, robot pose immediately after reset
 float64 robot_origin_y
 float64 robot_origin_yaw
 
-# Which contact-probe parameter is being varied this trial, and its value --
-# every OTHER tunable parameter below is held at its baseline value (see
-# tuning_sweep.yaml's `baseline` block) for this trial.
-string swept_param
-float64 swept_value
+# Index of this trial's parameter combination in the full-factorial grid
+# (shared by both arms and all repeats of that combination).
+uint32 combo_id
 
-# Actual value of EVERY tunable parameter used for this trial (baseline for
-# all except swept_param, which carries the swept value). Logged explicitly
-# so summary.csv is self-describing per row -- tuning_plotting.py's "vs
-# param" curves group directly on these columns across the WHOLE sweep, not
-# just the rows where that particular parameter was the one being swept
-# (see that module's docstring for why pooling this way is correct for a
-# one-at-a-time sweep design).
+# Value of every tunable parameter used for this trial. Logged explicitly so
+# summary.csv is self-describing per row -- tuning_plotting.py's "vs param"
+# curves average over all other parameters (main effects of a balanced
+# factorial design).
 float64 probe_speed
 float64 probe_distance
 float64 contact_hold_time

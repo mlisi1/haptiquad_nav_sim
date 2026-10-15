@@ -195,6 +195,9 @@ def load_summary(tag_dir, config=None):
     df = pd.read_csv(path)
     n_before = len(df)
     df = df[df['end_reason'] != 'superseded']  # forced-close artifacts, not real trials
+    # A trial interrupted by a stack restart (run_sweep.sh) is re-run on
+    # resume and can be logged twice; the later row is the complete one.
+    df = df.drop_duplicates('trial_id', keep='last')
     # sim_anomaly (SimHealthMonitor, trial_core.py): a Gazebo physics
     # explosion/teleport, tip-over, out-of-range height, or a stall was
     # detected during the trial. Older summary.csv files predate this

@@ -3,7 +3,7 @@
 # haptiquad_nav/config/contact_probe.yaml is loaded — read via plain
 # rospy.get_param('key', default) in every eval script.
 
-experiment_tag: "sweep_01"
+experiment_tag: "mass_mu_final"
 
 # Where the eval object is spawned each trial, relative to the robot's pose
 # right after that trial's reset (read fresh from /slam/pose every time,
@@ -20,7 +20,8 @@ reset_settle_time: 1.5       # [s] pause after the sim/estimator reset before tr
 no_contact_timeout: 25.0     # [s] give up waiting for CONTACT_PROBE entry
 trial_timeout: 60.0          # [s] overall per-trial safety net
 
-repeats: 1                   # repeats per (geometry, mass, mu, angle, offset) combo
+repeats: 5                   # repeats per (geometry, mass, mu, angle, offset) combo
+                             # (2 geometries x 9 masses x 7 mu x 5 = 630 trials)
 
 # Optional Gazebo speed-up (EXPERIMENTAL) -- best-effort request for Gazebo
 # to target this multiple of real-time by scaling max_update_rate only

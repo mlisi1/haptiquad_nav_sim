@@ -58,7 +58,7 @@ SUMMARY_FIELDS = [
     'object_name', 'mass_kg', 'mu', 'geometry', 'size_x', 'size_y', 'size_z',
     'spawn_x', 'spawn_y', 'goal_x', 'goal_y',
     'approach_angle_rad', 'robot_origin_x', 'robot_origin_y', 'robot_origin_yaw',
-    'swept_param', 'swept_value',
+    'combo_id',
     'probe_speed', 'probe_distance', 'contact_hold_time', 'classify_time',
     'classification_force_settle_time', 'wrench_filter_window',
     't_goal_sent', 't_probe_entry', 't_contact_onset',
@@ -166,8 +166,8 @@ class TuningTrialLogger:
         self._finish_check_timer = rospy.Timer(rospy.Duration(0.1), self._finish_check_cb)
 
         rospy.loginfo(
-            '[TuningTrialLogger] Trial %d started (%s, %s=%s, mass=%.1fkg mu=%.2f)',
-            msg.trial_id, msg.trial_mode, msg.swept_param, msg.swept_value,
+            '[TuningTrialLogger] Trial %d started (%s, combo %d, mass=%.1fkg mu=%.2f)',
+            msg.trial_id, msg.trial_mode, msg.combo_id,
             msg.mass, msg.mu)
 
     def _watchdog_cb(self, _event):
@@ -242,7 +242,7 @@ class TuningTrialLogger:
             'approach_angle_rad': trial.approach_angle,
             'robot_origin_x': trial.robot_origin_x, 'robot_origin_y': trial.robot_origin_y,
             'robot_origin_yaw': trial.robot_origin_yaw,
-            'swept_param': trial.swept_param, 'swept_value': trial.swept_value,
+            'combo_id': trial.combo_id,
             'probe_speed': trial.probe_speed, 'probe_distance': trial.probe_distance,
             'contact_hold_time': trial.contact_hold_time, 'classify_time': trial.classify_time,
             'classification_force_settle_time': trial.classification_force_settle_time,
@@ -273,9 +273,8 @@ class TuningTrialLogger:
             w.writerow(row)
 
         rospy.loginfo(
-            '[TuningTrialLogger] Trial %d finished: %s/%s (%s=%s, %.2fs probe->exit) -> %s',
-            trial.trial_id, trial.trial_mode, classified_label,
-            trial.swept_param, trial.swept_value,
+            '[TuningTrialLogger] Trial %d finished: %s/%s (combo %d, %.2fs probe->exit) -> %s',
+            trial.trial_id, trial.trial_mode, classified_label, trial.combo_id,
             row['t_probe_to_classify_exit_s'], summary_path)
 
 
