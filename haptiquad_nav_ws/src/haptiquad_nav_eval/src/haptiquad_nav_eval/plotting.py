@@ -15,16 +15,18 @@ scripts/plot_results.py, the CLI wrapper for running it by hand.
 Config-driven, one YAML file per plot: generate_all() writes (or, on a
 re-run, reads back and reuses) <tag_dir>/plots/config/<plot_name>.yaml for
 every plot, plus a shared config/ground_truth.yaml for the reference values
-several plots share. Edit any of those files and re-run to change just that
-plot's parameters -- no simulation, no ROS, no rebuild required. See
+several plots share, via the shared plot_config.load_or_init_config() (also
+used by timing_plotting.py and tuning_plotting.py -- see that module's
+docstring). Edit any of those files and re-run to change just that plot's
+parameters -- no simulation, no ROS, no rebuild required. See
 DEFAULT_CONFIG below for every tunable and its default.
 
-generate_all() also copies this module plus a tiny standalone runner into
-<tag_dir>/plot_scripts/, so the results folder is self-contained: the
-plotting code and its config travel with the data, and `python3
-plot_scripts/regenerate.py` works from just that folder (pandas, numpy,
-matplotlib, pyyaml -- no ROS, no rospkg) even if the haptiquad_nav_eval
-package isn't checked out anywhere nearby.
+generate_all() also copies this module plus plot_config.py plus a tiny
+standalone runner into <tag_dir>/plot_scripts/, so the results folder is
+self-contained: the plotting code and its config travel with the data, and
+`python3 plot_scripts/regenerate.py` works from just that folder (pandas,
+numpy, matplotlib, pyyaml -- no ROS, no rospkg) even if the
+haptiquad_nav_eval package isn't checked out anywhere nearby.
 
 Each plot function takes (df, out_path, cfg) and is wrapped individually in
 try/except by generate_all() so one bad/missing column (e.g. safety fields
@@ -32,7 +34,7 @@ recorded before trial_logger.py added them -- see that module's docstring)
 skips only that one plot instead of aborting the rest.
 """
 import os
-import shutil
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -45,6 +47,17 @@ try:
     import yaml
 except ImportError:  # pragma: no cover -- normally present in this ROS env
     yaml = None
+
+try:
+    # Normal case: imported as haptiquad_nav_eval.plotting.
+    from haptiquad_nav_eval.plot_config import (load_or_init_config, bundle_scripts,
+                                                exclude_duration_outliers)
+except ImportError:
+    # Self-contained plot_scripts/ bundle case (see _bundle_scripts's call
+    # in generate_all()): plot_config.py sits flat next to this file with
+    # no package wrapper, and regenerate.py has already put that directory
+    # on sys.path.
+    from plot_config import load_or_init_config, bundle_scripts, exclude_duration_outliers
 
 
 G = 9.81  # m/s^2, matches trial_core.G / default.yaml's gravity_z
@@ -87,10 +100,10 @@ def _require_columns(df, cols, hint):
 # call time except via the `cfg` argument they're passed, so editing a
 # written-out YAML and re-running always takes effect.
 
-def _live_classification_threshold(default=127.8):
+def _live_classification_threshold(default=100.0):
     """Best-effort read of contact_probe.yaml's live
     classification_force_threshold_n -- the settled-force MOVABLE/SOLID
-    decision cutoff (force-mode classification), NOT wrench_threshold/fx
+    decision cutoff (force-mode classification), NOT contact_force_threshold_n
     (which only gates CONTACT_PROBE detection and, since the fz/torque-noise
     fix, sits far lower -- e.g. 12N -- than any meaningful movable/solid
     boundary). Used ONLY to seed ground_truth.yaml the first time a tag
@@ -122,7 +135,7 @@ def _live_backup_min_clearance(default=0.60):
         return default
 
 
-def _live_classification_settle_time(default=0.5):
+def _live_classification_settle_time(default=0.2):
     """Same idea as _live_classification_threshold(), for
     classification_force_settle_time -- used to offline-reconstruct the
     settled force in plot_force_vs_static_friction."""
@@ -147,10 +160,24 @@ def default_config():
     preserve balance rather than lean fully into the push. Override if you
     have a better number (e.g. from an actual push-to-failure test)."""
     return {
+        'outlier_filter': {
+            'enabled': True,
+            # nav_time_to_classification is the closest analog here to
+            # timing_plotting.py's total_time_s / tuning_plotting.py's
+            # t_probe_to_classify_exit_s -- see
+            # plot_config.exclude_duration_outliers()'s docstring for why
+            # this filter exists alongside sim_anomaly (a trial can keep
+            # moving, just erratically/far slower than normal, without the
+            # online stall detector ever firing).
+            'value_col': 'nav_time_to_classification',
+            'group_by': ['classified_label'],   # median computed per outcome
+            'multiplier': 3.0,
+            'min_group_size': 3,
+        },
         'ground_truth': {
             # The settled-force classification cutoff (contact_probe.yaml's
             # classification_force_threshold_n), NOT the contact-DETECTION
-            # threshold (wrench_threshold/fx) -- see
+            # threshold (contact_force_threshold_n) -- see
             # _live_classification_threshold()'s docstring for why those two
             # are different numbers and using the wrong one here silently
             # gives a meaningless ground truth.
@@ -256,6 +283,50 @@ def default_config():
             'title': 'Stability during contact vs normal-walking baseline\n'
                      '(per-trial std within each phase, pooled across the sweep)',
         },
+        'stability_vs_param': {
+            # plot_stability() plots peak roll/pitch against trial_id (run
+            # order, physically meaningless); this plots the same peak
+            # values against the sweep's own independent variables instead.
+            'roll_pitch_safe_limit_deg': 15.0,
+            'figsize': [11, 8],
+            'marker_size': 40,
+            'legend_fontsize': 7,
+            'dpi': 150,
+            'title': "Base stability vs. the sweep's own independent variables (mass, friction)",
+            'colors': {},
+        },
+        'stability_distribution': {
+            # Distribution view (histogram) of the same peak_roll_deg/
+            # peak_pitch_deg columns plot_stability() scatters per trial --
+            # shows overall shape/spread/overlap between labels rather than
+            # one point per trial_id.
+            'roll_pitch_safe_limit_deg': 15.0,
+            'bins': 20,
+            'figsize': [11, 5],
+            'legend_fontsize': 8,
+            'dpi': 150,
+            'title': 'Distribution of peak roll/pitch across the sweep',
+            'colors': {},
+        },
+        'stability_timeseries_all': {
+            # The "consider all the trials, not a couple of examples"
+            # complement to plot_timeseries_examples() (which deliberately
+            # shows only a handful of representative force/displacement
+            # traces -- plotting every trial's full force signal would be
+            # unreadable clutter; roll/pitch is compact enough that
+            # literally every trial fits on one axis at once). Every
+            # trial's roll/pitch trace is drawn as a thin line (line_alpha)
+            # plus a per-label bold median line resampled onto a shared
+            # n_grid_points-point time axis.
+            'roll_pitch_safe_limit_deg': 15.0,
+            'line_alpha': 0.15,
+            'n_grid_points': 100,
+            'figsize': [9, 7],
+            'legend_fontsize': 7,
+            'dpi': 150,
+            'title': 'Roll/pitch over time since CONTACT_PROBE entry -- every trial (thin) + per-label median (bold)',
+            'colors': {},
+        },
         'safety_margin_backup': {
             'backup_min_clearance_m': _live_backup_min_clearance(),
             'figsize': [7, 5],
@@ -286,38 +357,39 @@ def default_config():
     }
 
 
-def _load_or_init_config(tag_dir):
-    """Load <tag_dir>/plots/config/*.yaml if present (so hand-edits survive
-    a re-run); otherwise seed from default_config() and write it out. Missing
-    individual files/keys fall back to defaults rather than erroring, so
-    adding a new plot later doesn't require regenerating old config dirs."""
-    config_dir = os.path.join(tag_dir, 'plots', 'config')
-    os.makedirs(config_dir, exist_ok=True)
-    defaults = default_config()
-    resolved = {}
-    for name, default_section in defaults.items():
-        path = os.path.join(config_dir, name + '.yaml')
-        if os.path.exists(path) and yaml is not None:
-            try:
-                with open(path) as f:
-                    loaded = yaml.safe_load(f) or {}
-                section = dict(default_section)
-                section.update(loaded)
-            except Exception:
-                section = dict(default_section)
-        else:
-            section = dict(default_section)
-        resolved[name] = section
-        if yaml is not None:
-            with open(path, 'w') as f:
-                yaml.safe_dump(section, f, sort_keys=False)
-    return resolved
-
-
 # ── Data loading ─────────────────────────────────────────────────────────────
 
 def load_summary(tag_dir, config):
     df = pd.read_csv(os.path.join(tag_dir, 'csv', 'summary.csv'))
+    n_before = len(df)
+    df = df[df['end_reason'] != 'superseded']   # forced-close artifacts, not real trials
+    # sim_anomaly (SimHealthMonitor, trial_core.py): a Gazebo physics
+    # explosion/teleport, tip-over, out-of-range height, or a stall was
+    # detected during the trial -- its data (timing, classification, even
+    # peak forces) can't be trusted. Older summary.csv files predate this
+    # column; skip the filter rather than KeyError on them.
+    if 'sim_anomaly' in df.columns:
+        df = df[df['sim_anomaly'].fillna('') == '']
+    n_dropped = n_before - len(df)
+    if n_dropped:
+        print('[plotting] Excluded %d/%d rows (superseded/sim_anomaly) from %s' %
+              (n_dropped, n_before, tag_dir))
+
+    ocfg = config.get('outlier_filter', {})
+    if ocfg.get('enabled', True):
+        n_before_outliers = len(df)
+        df, dropped = exclude_duration_outliers(
+            df, ocfg.get('group_by', ['classified_label']),
+            ocfg.get('value_col', 'nav_time_to_classification'),
+            multiplier=ocfg.get('multiplier', 3.0), min_group_size=ocfg.get('min_group_size', 3))
+        if len(dropped):
+            value_col = ocfg.get('value_col', 'nav_time_to_classification')
+            print('[plotting] Excluded %d/%d rows as duration outliers from %s:' %
+                  (len(dropped), n_before_outliers, tag_dir))
+            for _, row in dropped.iterrows():
+                print('    trial_id=%s classified_label=%s %s=%.2f' %
+                     (row['trial_id'], row['classified_label'], value_col, row[value_col]))
+
     gt = config['ground_truth']
     # ODE combines two contacting surfaces' friction via the minimum -- see
     # ground_truth.ground_mu's comment in default_config().
@@ -550,35 +622,49 @@ def _boxplot_by_label(ax, df, value_col, title, colors=None, title_fontsize=None
 
 
 def plot_timing_by_label(df, out_path, cfg):
-    """Two panels, deliberately separated because they answer different
+    """Three panels, deliberately separated because they answer different
     questions and conflating them is misleading:
 
-    Left  -- time to DECISION (t_classify_entry -> t_classify_exit, i.e.
-             classify_time). This is a fixed-duration window applied
-             identically regardless of outcome, so it should be about the
-             SAME for MOVABLE and SOLID -- there is no real "movable is
-             faster to detect" effect; this panel exists to demonstrate that.
-    Right -- time to full RESOLUTION (nav_time_to_classification: goal-sent
-             to state machine back in NORMAL_NAV). This one IS asymmetric,
-             but for a structural reason: a SOLID verdict additionally
-             requires the whole BACKING_UP maneuver before the state
-             machine resolves, which a MOVABLE verdict skips entirely. The
-             asymmetry lives here, not in the classification decision.
+    Left   -- time to DECISION (t_classify_entry -> t_classify_exit, i.e.
+              classify_time). This is a fixed-duration window applied
+              identically regardless of outcome, so it should be about the
+              SAME for MOVABLE and SOLID -- there is no real "movable is
+              faster to detect" effect; this panel exists to demonstrate that.
+    Middle -- time PROBE-to-DECISION (t_probe_to_classify_exit_s:
+              t_probe_entry -> t_classify_exit). Unlike the left panel this
+              one is NOT a fixed window -- it also includes the
+              approach-to-contact travel and the contact_hold_time dwell,
+              both of which CAN vary with mass/mu (e.g. a high-friction/heavy
+              object may ramp the wrench above threshold sooner than a
+              light/slippery one that initially slips before load builds).
+              Same field name as timing_trial_logger.py's (the
+              lateral-length sweep) so classification speed is comparable
+              across both sweeps -- see that module's docstring.
+    Right  -- time to full RESOLUTION (nav_time_to_classification: goal-sent
+              to state machine back in NORMAL_NAV). This one IS asymmetric,
+              but for a structural reason: a SOLID verdict additionally
+              requires the whole BACKING_UP maneuver before the state
+              machine resolves, which a MOVABLE verdict skips entirely. The
+              asymmetry lives here, not in the classification decision.
     """
     df = df.copy()
     df['time_to_decision_s'] = df['t_classify_exit'] - df['t_classify_entry']
     colors = cfg.get('colors', {})
 
-    fig, axes = plt.subplots(1, 2, figsize=cfg.get('figsize', (11, 5)))
+    fig, axes = plt.subplots(1, 3, figsize=cfg.get('figsize', (15, 5)))
     ok1 = _boxplot_by_label(axes[0], df, 'time_to_decision_s',
                             'Time to classification DECISION\n(classify_time window -- same for both, by design)',
                             colors=colors)
     axes[0].set_ylabel('time (s)')
-    ok2 = _boxplot_by_label(axes[1], df, 'nav_time_to_classification',
-                            'Time to full state-machine RESOLUTION\n(SOLID includes BACKING_UP; MOVABLE does not)',
+    ok2 = _boxplot_by_label(axes[1], df, 't_probe_to_classify_exit_s',
+                            'Time PROBE-entry to DECISION\n(approach-to-contact + hold_time + classify_time -- can vary with mass/mu)',
                             colors=colors)
     axes[1].set_ylabel('time (s)')
-    if not (ok1 or ok2):
+    ok3 = _boxplot_by_label(axes[2], df, 'nav_time_to_classification',
+                            'Time to full state-machine RESOLUTION\n(SOLID includes BACKING_UP; MOVABLE does not)',
+                            colors=colors)
+    axes[2].set_ylabel('time (s)')
+    if not (ok1 or ok2 or ok3):
         raise ValueError('no timing data to plot')
     fig.tight_layout()
     fig.savefig(out_path, dpi=cfg.get('dpi', 150))
@@ -852,6 +938,193 @@ def plot_stability_baseline(df, out_path, cfg, tag_dir):
     plt.close(fig)
 
 
+def plot_stability_vs_param(df, out_path, cfg):
+    """Peak roll/pitch vs. the sweep's own independent variables (mass, mu)
+    instead of plot_stability()'s trial_id (run order, which has no
+    physical meaning). Answers the actually interesting question directly:
+    does a heavier/higher-friction push correlate with more instability?"""
+    needed = ['peak_roll_deg', 'peak_pitch_deg']
+    _require_columns(df, needed, 'trial_logger.py needs restarting after the roll/pitch '
+                                 'instrumentation was added (see its module docstring)')
+    if df[needed].isna().all().all():
+        raise ValueError('stability columns are present but entirely NaN for every trial in '
+                         'this results directory -- recorded before trial_logger.py was restarted')
+
+    colors = dict(LABEL_COLORS, **cfg.get('colors', {}))
+    marker_size = cfg.get('marker_size', 40)
+    legend_fontsize = cfg.get('legend_fontsize', 7)
+    safe_deg = cfg.get('roll_pitch_safe_limit_deg', 15.0)
+
+    fig, axes = plt.subplots(2, 2, figsize=cfg.get('figsize', (11, 8)))
+    panels = (
+        (axes[0, 0], 'mass_kg', 'peak_roll_deg', 'mass (kg)', 'peak |roll| (deg)'),
+        (axes[0, 1], 'mu', 'peak_roll_deg', 'friction coefficient (mu)', 'peak |roll| (deg)'),
+        (axes[1, 0], 'mass_kg', 'peak_pitch_deg', 'mass (kg)', 'peak |pitch| (deg)'),
+        (axes[1, 1], 'mu', 'peak_pitch_deg', 'friction coefficient (mu)', 'peak |pitch| (deg)'),
+    )
+    any_plotted = False
+    for ax, xcol, ycol, xlabel, ylabel in panels:
+        sub = df.dropna(subset=[xcol, ycol])
+        if sub.empty:
+            ax.set_title(ylabel + ' vs ' + xlabel + '\n(no data)')
+            ax.axis('off')
+            continue
+        any_plotted = True
+        for label, group in sub.groupby('classified_label'):
+            ax.scatter(group[xcol], group[ycol], c=colors.get(label, 'tab:brown'), label=label,
+                      s=marker_size, edgecolors='k', linewidths=0.4, zorder=3)
+        ax.axhline(safe_deg, ls='--', c='red', lw=1, alpha=0.6,
+                  label='reference limit (%.0f deg)' % safe_deg, zorder=2)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=legend_fontsize)
+    if not any_plotted:
+        plt.close(fig)
+        raise ValueError('no rows with both mass_kg/mu and peak roll/pitch data')
+    fig.suptitle(cfg.get('title', "Base stability vs. the sweep's own independent variables "
+                        '(mass, friction)'))
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    fig.savefig(out_path, dpi=cfg.get('dpi', 150))
+    plt.close(fig)
+
+
+def plot_stability_distribution(df, out_path, cfg):
+    """Distribution (histogram) of peak roll/pitch across the WHOLE sweep,
+    split by classified_label -- shows the overall shape/spread/overlap
+    between labels' instability, complementing plot_stability()'s one
+    point per trial and plot_stability_vs_param()'s per-parameter view."""
+    needed = ['peak_roll_deg', 'peak_pitch_deg']
+    _require_columns(df, needed, 'trial_logger.py needs restarting after the roll/pitch '
+                                 'instrumentation was added (see its module docstring)')
+    if df[needed].isna().all().all():
+        raise ValueError('stability columns are present but entirely NaN for every trial in '
+                         'this results directory -- recorded before trial_logger.py was restarted')
+
+    colors = dict(LABEL_COLORS, **cfg.get('colors', {}))
+    safe_deg = cfg.get('roll_pitch_safe_limit_deg', 15.0)
+    bins = cfg.get('bins', 20)
+    present = [l for l in df['classified_label'].dropna().unique()]
+    ordered = [l for l in LABEL_COLORS if l in present] + [l for l in present if l not in LABEL_COLORS]
+
+    fig, axes = plt.subplots(1, 2, figsize=cfg.get('figsize', (11, 5)))
+    any_plotted = False
+    for ax, col, xlabel in ((axes[0], 'peak_roll_deg', 'peak |roll| (deg)'),
+                            (axes[1], 'peak_pitch_deg', 'peak |pitch| (deg)')):
+        for label in ordered:
+            vals = df.loc[df['classified_label'] == label, col].dropna().values
+            if len(vals) == 0:
+                continue
+            any_plotted = True
+            ax.hist(vals, bins=bins, color=colors.get(label, 'tab:brown'), alpha=0.5,
+                   label='%s (n=%d)' % (label, len(vals)), edgecolor='k', linewidth=0.3)
+        ax.axvline(safe_deg, ls='--', c='red', lw=1, alpha=0.6,
+                  label='reference limit (%.0f deg)' % safe_deg)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel('trial count')
+        ax.grid(alpha=0.3, axis='y')
+        ax.legend(fontsize=cfg.get('legend_fontsize', 8))
+    if not any_plotted:
+        plt.close(fig)
+        raise ValueError('no peak roll/pitch data to plot')
+    fig.suptitle(cfg.get('title', 'Distribution of peak roll/pitch across the sweep'))
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(out_path, dpi=cfg.get('dpi', 150))
+    plt.close(fig)
+
+
+def _collect_stability_traces(tag_dir, df):
+    """Per-trial (classified_label, t_since_probe_entry, roll_deg,
+    pitch_deg) arrays for every trial that has a timeseries file -- the
+    same raw per-trial traces plot_timeseries_examples() reads for a
+    couple of hand-picked examples, but for literally every trial, feeding
+    plot_stability_timeseries_all()'s all-trials view instead."""
+    out = []
+    for tid, label in zip(df['trial_id'], df['classified_label']):
+        path = os.path.join(tag_dir, 'csv', 'trial_%05d_timeseries.csv' % int(tid))
+        if not os.path.exists(path):
+            continue
+        try:
+            ts = pd.read_csv(path, usecols=lambda c: c in ('t_since_probe_entry', 'roll', 'pitch'))
+        except Exception:
+            continue
+        if ts.empty or 't_since_probe_entry' not in ts.columns:
+            continue
+        out.append((label, ts['t_since_probe_entry'].values,
+                   np.degrees(ts['roll'].values), np.degrees(ts['pitch'].values)))
+    return out
+
+
+def plot_stability_timeseries_all(df, out_path, cfg, tag_dir):
+    """Roll/pitch over time since CONTACT_PROBE entry, for EVERY trial in
+    the sweep at once -- the "consider all the trials, not a couple of
+    examples" complement to plot_timeseries_examples() (which deliberately
+    shows only a handful of representative force/displacement traces,
+    since plotting every trial's full force signal would be unreadable
+    clutter; roll/pitch is compact enough that literally all of them fit on
+    one axis). Each trial is drawn as a thin, semi-transparent line; a bold
+    per-label median line is overlaid, computed by resampling every trial
+    onto a shared time grid (np.interp, NaN past a trial's own end) and
+    taking nanmedian at each grid point."""
+    traces = _collect_stability_traces(tag_dir, df)
+    if not traces:
+        raise ValueError('no per-trial timeseries files found (or none with data)')
+
+    colors = dict(LABEL_COLORS, **cfg.get('colors', {}))
+    line_alpha = cfg.get('line_alpha', 0.15)
+    n_grid = cfg.get('n_grid_points', 100)
+    safe_deg = cfg.get('roll_pitch_safe_limit_deg', 15.0)
+
+    max_t = max((t.max() for _, t, _, _ in traces if len(t)), default=None)
+    if max_t is None or max_t <= 0:
+        raise ValueError('every trial timeseries is empty or single-sample -- nothing to plot')
+    grid = np.linspace(0, max_t, n_grid)
+
+    fig, axes = plt.subplots(2, 1, figsize=cfg.get('figsize', (9, 7)), sharex=True)
+    by_label = {}
+    for label, t, roll_deg, pitch_deg in traces:
+        color = colors.get(label, 'tab:brown')
+        axes[0].plot(t, roll_deg, color=color, alpha=line_alpha, lw=0.8, zorder=1)
+        axes[1].plot(t, pitch_deg, color=color, alpha=line_alpha, lw=0.8, zorder=1)
+        by_label.setdefault(label, []).append((t, roll_deg, pitch_deg))
+
+    for label, rows in by_label.items():
+        color = colors.get(label, 'tab:brown')
+        roll_grid = np.full((len(rows), n_grid), np.nan)
+        pitch_grid = np.full((len(rows), n_grid), np.nan)
+        for i, (t, roll_deg, pitch_deg) in enumerate(rows):
+            if len(t) < 2:
+                continue
+            roll_grid[i] = np.interp(grid, t, roll_deg, right=np.nan)
+            pitch_grid[i] = np.interp(grid, t, pitch_deg, right=np.nan)
+        # All-NaN columns are expected and correct here (e.g. MOVABLE trials
+        # end sooner than SOLID's backup maneuver, so nothing has data past
+        # that point for that label) -- nanmedian's RuntimeWarning about it
+        # is just noise, not a real problem.
+        with warnings.catch_warnings(), np.errstate(all='ignore'):
+            warnings.simplefilter('ignore', category=RuntimeWarning)
+            roll_med = np.nanmedian(roll_grid, axis=0)
+            pitch_med = np.nanmedian(pitch_grid, axis=0)
+        axes[0].plot(grid, roll_med, color=color, lw=2.5, zorder=3,
+                    label='%s (median, n=%d)' % (label, len(rows)))
+        axes[1].plot(grid, pitch_med, color=color, lw=2.5, zorder=3,
+                    label='%s (median, n=%d)' % (label, len(rows)))
+
+    for ax, ylabel in ((axes[0], 'roll (deg)'), (axes[1], 'pitch (deg)')):
+        ax.axhline(safe_deg, ls='--', c='red', lw=1, alpha=0.5,
+                  label='reference limit (±%.0f deg)' % safe_deg)
+        ax.axhline(-safe_deg, ls='--', c='red', lw=1, alpha=0.5)
+        ax.set_ylabel(ylabel)
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=cfg.get('legend_fontsize', 7))
+    axes[-1].set_xlabel('t since CONTACT_PROBE entry (s)')
+    fig.suptitle(cfg.get('title', 'Roll/pitch over time since CONTACT_PROBE entry -- every '
+                        'trial (thin) + per-label median (bold)'))
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    fig.savefig(out_path, dpi=cfg.get('dpi', 150))
+    plt.close(fig)
+
+
 def plot_safety_margin_backup(df, out_path, cfg):
     """How much clearance the robot actually kept from an unknown rear
     obstacle while reversing (BACKING_UP), vs the configured safety minimum
@@ -1008,22 +1281,7 @@ if __name__ == '__main__':
 '''
 
 
-def _bundle_scripts(tag_dir):
-    """Copy this module + a tiny runner into <tag_dir>/plot_scripts/, so the
-    results folder is self-contained (see module docstring). When
-    regenerate.py is run FROM that bundle (the documented, primary way to
-    use it), the running plotting.py IS already the bundle's own copy --
-    _THIS_FILE and the copy destination are then the same path, which
-    shutil.copyfile refuses (SameFileError). That's a no-op, not an error:
-    the bundle is already up to date with itself."""
-    bundle_dir = os.path.join(tag_dir, 'plot_scripts')
-    os.makedirs(bundle_dir, exist_ok=True)
-    dest = os.path.join(bundle_dir, 'plotting.py')
-    if os.path.abspath(dest) != os.path.abspath(_THIS_FILE):
-        shutil.copyfile(_THIS_FILE, dest)
-    with open(os.path.join(bundle_dir, 'regenerate.py'), 'w') as f:
-        f.write(_REGENERATE_SCRIPT)
-    os.chmod(os.path.join(bundle_dir, 'regenerate.py'), 0o755)
+_PLOT_CONFIG_FILE = os.path.join(os.path.dirname(_THIS_FILE), 'plot_config.py')
 
 
 def generate_all(tag_dir, n_timeseries_examples_per_label=None):
@@ -1038,7 +1296,7 @@ def generate_all(tag_dir, n_timeseries_examples_per_label=None):
     (or would be written to) config/timeseries_examples.yaml -- kept as a
     kwarg for backwards-compatible callers; prefer editing the YAML.
     """
-    config = _load_or_init_config(tag_dir)
+    config = load_or_init_config(tag_dir, default_config())
     if n_timeseries_examples_per_label is not None:
         config['timeseries_examples']['n_per_label'] = n_timeseries_examples_per_label
 
@@ -1074,10 +1332,14 @@ def generate_all(tag_dir, n_timeseries_examples_per_label=None):
     _run('timeseries_examples.png', plot_timeseries_examples, config['timeseries_examples'])
     _run('stability.png', plot_stability, config['stability'])
     _run('stability_baseline.png', plot_stability_baseline, config['stability_baseline'], tag_dir)
+    _run('stability_vs_mass_mu.png', plot_stability_vs_param, config['stability_vs_param'])
+    _run('stability_distribution.png', plot_stability_distribution, config['stability_distribution'])
+    _run('stability_timeseries_all.png', plot_stability_timeseries_all,
+        config['stability_timeseries_all'], tag_dir)
     _run('safety_margin_backup.png', plot_safety_margin_backup, config['safety_margin_backup'])
     _run('estimator_health.png', plot_estimator_health, config['estimator_health'])
     _run('correlations.png', plot_correlations, config['correlations'])
 
-    _bundle_scripts(tag_dir)
+    bundle_scripts(tag_dir, [_THIS_FILE, _PLOT_CONFIG_FILE], _REGENERATE_SCRIPT)
 
     return written, errors

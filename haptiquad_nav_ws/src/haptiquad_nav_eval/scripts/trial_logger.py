@@ -80,6 +80,7 @@ from diagnostic_msgs.msg import DiagnosticArray
 from actionlib_msgs.msg import GoalStatusArray, GoalStatus
 from haptiquad_msgs.msg import ResidualErrorStamped
 from haptiquad_nav_eval.msg import TrialStart
+from haptiquad_nav_eval.trial_core import SimHealthMonitor
 
 
 def _default_results_dir():
@@ -107,10 +108,26 @@ SUMMARY_FIELDS = [
     'mass_kg', 'mu', 'geometry', 'size_x', 'size_y', 'size_z',
     'approach_angle_rad', 'approach_offset_m', 'spawn_x', 'spawn_y',
     'robot_origin_x', 'robot_origin_y', 'robot_origin_yaw',
-    't_contact_onset', 't_classify_entry', 't_classify_exit',
+    't_probe_entry', 't_contact_onset', 't_classify_entry', 't_classify_exit',
+    # Mirrors timing_trial_logger.py's field of the same name (mass/mu sweep
+    # vs. lateral-length sweep otherwise never share a schema -- see that
+    # module's docstring) so "how long does classification actually take"
+    # can be compared/plotted across both sweeps on equal terms: probe entry
+    # (physical approach begins) through classify exit (decision made),
+    # i.e. approach-to-contact + contact_hold_time + classify_time.
+    't_probe_to_classify_exit_s',
     'delta_d_classify_window',
     'peak_fx', 'peak_fy', 'peak_fz', 'peak_tx', 'peak_ty', 'peak_tz',
     'classified_label', 'classification_mode', 'end_reason',
+    # Set by SimHealthMonitor (trial_core.py) if a Gazebo physics
+    # explosion/teleport, tip-over, out-of-range height, or a stall (no
+    # progress while contact_probe_manager expected forward motion) was
+    # detected at any point during the trial -- empty string if clean.
+    # generate_all()/load_summary() in plotting.py excludes non-empty rows
+    # from aggregate stats so one corrupted trial can't skew a cell's
+    # mean/std. See tuning_sweep_orchestrator.py's SimHealthMonitor.anomaly()
+    # for why this doesn't just try to prevent the underlying Gazebo glitch.
+    'sim_anomaly',
     't_goal_sent', 'nav_time_to_classification',
     'nav_status_at_finish', 'nav_status_at_finish_text',
     # Stability / safety -- see module docstring's "Safety/stability data" note.
@@ -193,6 +210,7 @@ class TrialLogger:
         self._peak_residual_err_ext = 0.0
         self._loop_rates = []
         self._latencies = []
+        self._health = SimHealthMonitor()
 
         rospy.Subscriber('/haptiquad_nav_eval/trial_start', TrialStart,
                          self._trial_start_cb, queue_size=1)
@@ -331,6 +349,7 @@ class TrialLogger:
         self._loop_rates = []
         self._latencies = []
         self._latest_move_base_status = None
+        self._health.arm()
 
         if self._watchdog_timer is not None:
             self._watchdog_timer.shutdown()
@@ -468,6 +487,10 @@ class TrialLogger:
 
         t_contact_onset = (self._t_classify_entry - self._contact_hold_time
                            if self._t_classify_entry is not None else NAN)
+        t_probe_to_classify_exit = (
+            self._t_classify_exit - self._t_probe_entry
+            if (self._t_probe_entry is not None and self._t_classify_exit is not None)
+            else NAN)
         delta_d = (self._d_at_classify_exit - self._d_at_classify_entry
                   if (self._d_at_classify_entry is not None
                       and self._d_at_classify_exit is not None) else NAN)
@@ -498,15 +521,18 @@ class TrialLogger:
             'spawn_x': trial.spawn_x, 'spawn_y': trial.spawn_y,
             'robot_origin_x': trial.robot_origin_x, 'robot_origin_y': trial.robot_origin_y,
             'robot_origin_yaw': trial.robot_origin_yaw,
+            't_probe_entry': self._t_probe_entry if self._t_probe_entry is not None else NAN,
             't_contact_onset': t_contact_onset,
             't_classify_entry': self._t_classify_entry if self._t_classify_entry is not None else NAN,
             't_classify_exit': self._t_classify_exit if self._t_classify_exit is not None else NAN,
+            't_probe_to_classify_exit_s': t_probe_to_classify_exit,
             'delta_d_classify_window': delta_d,
             'peak_fx': self._peak['fx'], 'peak_fy': self._peak['fy'], 'peak_fz': self._peak['fz'],
             'peak_tx': self._peak['tx'], 'peak_ty': self._peak['ty'], 'peak_tz': self._peak['tz'],
             'classified_label': classified_label,
             'classification_mode': self._classification_mode,
             'end_reason': end_reason,
+            'sim_anomaly': self._health.anomaly() or '',
             't_goal_sent': t_goal_sent,
             'nav_time_to_classification': t_finish - t_goal_sent,
             'nav_status_at_finish': nav_status_at_finish,

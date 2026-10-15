@@ -1,0 +1,38 @@
+<launch>
+  <!-- Runs the unattended contact-probe PARAMETER-TUNING sweep (movable and
+       solid arms, one contact-probe timing parameter varied at a time) and
+       logs one summary CSV row per trial.
+
+       Completely independent from eval_sweep.launch (mass/mu classification
+       sweep) and eval_timing_sweep.launch (lateral-length sweep): separate
+       config, separate node names, separate message type, separate results
+       directory. Do not run more than one of these three sweeps' orchestrators
+       at the same time, since they would fight over the same robot/goal, even
+       though the underlying nodes (contact_probe_manager, move_base) are
+       shared safely as long as only one sweep is active.
+
+       Requires:
+         1. haptiquad_anymal_bringup/launch/sim_eval.launch (empty world)
+            already running instead of the normal sim.launch.
+         2. haptiquad_nav's navigation.launch already running on top of it. -->
+
+  <rosparam file="$(find haptiquad_nav_eval)/config/tuning_sweep.yaml" command="load"/>
+
+  <!-- Override the sweep's experiment tag per run, e.g.:
+       roslaunch haptiquad_nav_eval eval_tuning_sweep.launch tag:=tuning_run_2026_09_02 -->
+  <arg name="tag" default=""/>
+  <param name="experiment_tag" value="$(arg tag)" if="$(eval tag != '')"/>
+
+  <!-- Optional Gazebo speed-up override, e.g.:
+       roslaunch haptiquad_nav_eval eval_tuning_sweep.launch speed_factor:=2.0
+       Leave at 1.0 (default, disabled) unless you know your machine can
+       keep up; see tuning_sweep.yaml's speed_factor comment. -->
+  <arg name="speed_factor" default=""/>
+  <param name="speed_factor" value="$(arg speed_factor)" if="$(eval speed_factor != '')"/>
+
+  <node name="tuning_trial_logger" pkg="haptiquad_nav_eval"
+        type="tuning_trial_logger.py" output="screen"/>
+
+  <node name="tuning_sweep_orchestrator" pkg="haptiquad_nav_eval"
+        type="tuning_sweep_orchestrator.py" output="screen"/>
+</launch>

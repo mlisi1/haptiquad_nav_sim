@@ -55,6 +55,7 @@ from geometry_msgs.msg import PolygonStamped, Point32
 
 from haptiquad_nav_eval.trial_core import (ObjectSpawner, SimReset, GoalSender, PoseCache,
                                            StateWatcher, GoalCompletionWatcher,
+                                           SimHealthMonitor, RealTimeFactorController,
                                            plan_object_and_goal)
 from haptiquad_nav_eval.msg import TimingTrialStart
 
@@ -73,7 +74,13 @@ class TimingSweepOrchestrator:
         self._geometry = rospy.get_param('geometry', 'box')
         self._size_x = rospy.get_param('size_x', 0.5)
         self._size_z = rospy.get_param('size_z', 1.0)
-        self._lengths = rospy.get_param('lengths_m')
+        self._robot_width = rospy.get_param('robot_width_m', 0.5)
+        # lengths_robot_widths is expressed as MULTIPLES of robot_width_m, not
+        # absolute meters -- see timing_sweep.yaml. Converted to meters here;
+        # everything downstream (_scale_radii, spawn size, TimingTrialStart)
+        # keeps working in absolute meters as before.
+        self._length_multiples = rospy.get_param('lengths_robot_widths')
+        self._lengths = [m * self._robot_width for m in self._length_multiples]
         self._movable_mass = rospy.get_param('movable_mass_kg', 5.0)
         self._movable_mu = rospy.get_param('movable_mu', 0.1)
         self._solid_mass = rospy.get_param('solid_mass_kg', 200.0)
@@ -88,6 +95,7 @@ class TimingSweepOrchestrator:
         self._trial_timeout = rospy.get_param('trial_timeout', 180.0)
         self._repeats = rospy.get_param('repeats', 3)
         self._excl_margin = rospy.get_param('excl_radius_margin_m', 0.3)
+        self._speed_factor = rospy.get_param('speed_factor', 1.0)
 
         # arm is the innermost loop (not repeats) so all three arms run back
         # to back for a given length before repeating -- e.g.
@@ -133,6 +141,15 @@ class TimingSweepOrchestrator:
         self._pose = PoseCache()
         self._state = StateWatcher()
         self._completion = GoalCompletionWatcher(self._goal_tolerance_m, self._goal_settle_time)
+        self._health = SimHealthMonitor()
+
+        # Optional speed-up -- see timing_sweep.yaml's speed_factor comment.
+        # restore() is registered on shutdown FIRST so a crash/Ctrl-C during
+        # startup still restores physics if apply() already changed it.
+        self._rtf = RealTimeFactorController()
+        rospy.on_shutdown(self._rtf.restore)
+        if self._speed_factor != 1.0:
+            self._rtf.apply(self._speed_factor)
 
         self._snapshot_contact_probe_config()
 
@@ -194,6 +211,7 @@ class TimingSweepOrchestrator:
             rospy.loginfo('[TimingSweep] Resumed: skipped %d already-completed trials.',
                           n_skipped)
         rospy.loginfo('[TimingSweep] Sweep complete (%d trials).', len(self._combos))
+        self._rtf.restore()
         self._generate_plots()
 
     def _generate_plots(self):
@@ -340,9 +358,11 @@ class TimingSweepOrchestrator:
         msg.goal_x, msg.goal_y = gx, gy
         msg.approach_angle = 0.0
         msg.robot_origin_x, msg.robot_origin_y, msg.robot_origin_yaw = rx, ry, ryaw
+        msg.robot_width_m = self._robot_width
 
         self._state.reset_edges()
         self._completion.arm(gx, gy)
+        self._health.arm()
         self._trial_pub.publish(msg)
         self._goals.send(gx, gy, 0.0)
 
@@ -350,6 +370,12 @@ class TimingSweepOrchestrator:
         while not rospy.is_shutdown():
             elapsed = (rospy.Time.now() - t0).to_sec()
             if self._completion.reached():
+                break
+            anomaly = self._health.anomaly()
+            if anomaly is not None:
+                rospy.logwarn('[TimingSweep] Trial %d (%s): %s -- abandoning trial early '
+                              '(timing_trial_logger.py will record it as anomalous).',
+                              trial_id, arm, anomaly)
                 break
             if (arm != 'classical' and not self._state.saw_contact_probe and
                     elapsed > self._no_contact_timeout):

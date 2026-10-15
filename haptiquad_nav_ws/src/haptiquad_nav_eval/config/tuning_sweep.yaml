@@ -1,0 +1,138 @@
+# tuning_sweep.yaml — shared params for the HaptiQuad-Nav CONTACT-PROBE
+# PARAMETER-TUNING harness (tuning_sweep_orchestrator.py / tuning_trial_logger.py).
+#
+# Completely independent from sweep.yaml (mass/mu classification sweep) and
+# timing_sweep.yaml (lateral-length sweep): separate config, launch file,
+# orchestrator/logger nodes, message type (TuningTrialStart), results
+# directory. All three may run against the same long-lived navigation.launch
+# stack (contact_probe_manager, move_base) but never at the same time.
+#
+# Question under test: which contact-probe TIMING parameters most affect how
+# long classification takes, and at what cost to correctness? Object mass/mu
+# and geometry are held FIXED at two representative points (one confirmed
+# MOVABLE, one confirmed SOLID by the mass/mu sweep) -- only contact-probe
+# parameters that can influence classification TIME are swept, one at a
+# time (all others held at baseline). Force thresholds (contact_force_
+# threshold_n, classification_force_threshold_n) and map/costmap parameters
+# (solid/movable exclusion radii, backup geometry, obstacle_assumed_depth,
+# etc.) are deliberately NOT included here -- they affect correctness or
+# downstream navigation, not classification time, and the mass/mu sweep
+# already covers them.
+
+experiment_tag: "tuning_sweep_01"
+
+# ── Fixed object (single size, NOT swept -- this experiment is about
+# contact-probe timing parameters, not obstacle geometry) ──────────────────
+geometry: box
+size_x: 0.5
+size_y: 0.5
+size_z: 1.0
+
+# Mass/mu for each arm -- confirmed MOVABLE/SOLID across the whole mass/mu
+# sweep. The movable point matches movable_box_* in mixed_obstacles_test.world;
+# note timing_sweep.yaml's movable arm now uses 15kg instead.
+movable_mass_kg: 5.0
+movable_mu: 0.1
+solid_mass_kg: 200.0
+solid_mu: 0.8
+
+# ── Approach / goal geometry (fixed, not swept) ────────────────────────────
+approach_distance: 3.0
+goal_overshoot: 1.5     # only needs to be a valid point past the obstacle for
+                        # the initial approach goal -- irrelevant to how this
+                        # experiment ends (see "Trial end condition" below)
+settle_time: 1.0
+reset_settle_time: 1.5
+
+# ── Baseline values (contact_probe.yaml's own defaults) ────────────────────
+# Whichever parameter is NOT being swept in a given trial is held at its
+# baseline value below -- always published explicitly every trial (never
+# left over from a previous trial), same discipline as
+# timing_sweep_orchestrator.py's radius overrides.
+baseline:
+  probe_speed: 0.30
+  probe_distance: 0.65
+  contact_hold_time: 1.0
+  classify_time: 0.6
+  classification_force_settle_time: 0.2
+  wrench_filter_window: 50
+
+# ── Swept grids, one parameter at a time (OFAT design) ─────────────────────
+# sweep_params fixes the iteration order (a loaded rosparam dict's key order
+# is not guaranteed). For each entry, EVERY value in its param_grids list
+# below is tried while every OTHER parameter stays at its baseline value
+# above.
+sweep_params:
+  - probe_speed
+  - probe_distance
+  - contact_hold_time
+  - classify_time
+  - classification_force_settle_time
+  - wrench_filter_window
+
+param_grids:
+  # [m/s]. contact_probe.yaml documents 0.1 m/s as too slow to push 5kg/
+  # mu=0.05 boxes -- floor kept comfortably above that. Upper end explores
+  # whether a harder impact destabilizes the robot (watch peak_roll_deg/
+  # peak_pitch_deg in summary.csv) before it saves meaningful time.
+  probe_speed: [0.15, 0.20, 0.30]
+  # [m]. Must stay > cloud_range_min (0.55m, contact_probe.yaml) and below
+  # slow_approach_distance (0.7m) so SLOW_APPROACH -> CONTACT_PROBE still
+  # makes sense.
+  probe_distance: [0.5, 0.55, 0.6, 0.65, 0.7]
+  # [s]. Exists to reject gait noise (~5-8N floor vs. the 12N
+  # contact_force_threshold_n) -- values well below baseline are expected to eventually
+  # start accepting noise as contact; that failure point is exactly what
+  # this sweep should reveal (watch classified_label/end_reason at the low
+  # end).
+  contact_hold_time: [0.2, 0.4, 0.6, 1.0, 1.5]
+  # [s]. Must exceed classification_force_settle_time's baseline (0.2s)
+  # with some margin left over for averaging.
+  classify_time: [0.3, 0.45, 0.6, 0.9, 1.2]
+  # [s]. Must stay below classify_time's baseline (0.6s). Exists to skip
+  # the initial impact/breakaway transient -- values near 0 are expected to
+  # start contaminating the settled-force reading with that transient.
+  classification_force_settle_time: [0.05, 0.1, 0.2, 0.3, 0.45]
+  # [samples, ~400Hz wrench publish rate]. Trades gait-noise rejection
+  # against detection latency -- 50 samples ~= 125ms.
+  wrench_filter_window: [10, 25, 50, 100, 200]
+
+repeats: 3   # repeats per (param, value, arm) cell
+
+# ── Trial end condition ────────────────────────────────────────────────────
+# Deliberately different from BOTH other sweeps: this trial ends the INSTANT
+# CLASSIFYING resolves (to NORMAL_NAV for MOVABLE, or to BACKING_UP for
+# SOLID) -- it does NOT wait for BACKING_UP to complete like the mass/mu
+# sweep's trial_logger.py, and does NOT wait for the real goal like
+# timing_trial_logger.py's GoalCompletionWatcher. The experiment only cares
+# about classification time, so running the backup/replan/re-approach
+# maneuver afterward would only burn wall-clock time on data this sweep
+# never uses. See ClassificationWatcher in trial_core.py.
+no_contact_timeout: 25.0   # [s] give up waiting for CONTACT_PROBE entry
+trial_timeout: 60.0        # [s] overall per-trial safety net -- shorter than
+                           # the other sweeps' since there's no BACKING_UP
+                           # wait here
+
+# ── Optional Gazebo speed-up (EXPERIMENTAL) ────────────────────────────────
+# Best-effort request for Gazebo to target this multiple of real-time by
+# scaling max_update_rate only (physics step SIZE, gravity, and ODE solver
+# settings are left untouched, so simulated dynamics/timing fidelity is
+# unaffected -- only how many wall-clock seconds it takes to compute them).
+# Since navigation.launch sets /use_sim_time:true, every timestamp this
+# harness records (rospy.Time.now()) is SIM time, so classification-time
+# metrics are unaffected by whatever factor is actually achieved -- only how
+# long you wait in the real world for the sweep to finish. If the CPU can't
+# keep up, Gazebo just falls back to whatever real factor it can sustain --
+# this is a target, not a guarantee. Restored to its original value
+# automatically when the sweep ends (or is killed) via rospy.on_shutdown.
+# NOT verified against the proprietary ANYmal controller/estimator stack's
+# own internal timing assumptions -- if stability/estimator-health metrics
+# (peak_roll_deg, cpm_wrench_latency_ms_mean) get visibly worse only at
+# speed_factor > 1, the low-level stack doesn't tolerate it well; drop back
+# to 1.0.
+speed_factor: 1.0    # 1.0 = disabled (real-time). Try 2.0 for a 2x target.
+
+# Where CSVs are written. Defaults to <this package>/.results/<tag> (same
+# gitignored, host-visible folder the other two sweeps use) under its own
+# tag, so no results folder ever collides.
+# results_dir: "/home/anydev/haptiquad_eval_results"

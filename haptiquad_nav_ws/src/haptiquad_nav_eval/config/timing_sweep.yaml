@@ -26,16 +26,30 @@ geometry: box
 size_x: 0.5
 size_z: 1.0
 
-# Swept variable: lateral length (m). Range chosen relative to robot/costmap
-# geometry (footprint half-width 0.25m, inflation_radius 0.80m) so any
-# crossover between "faster to push" and "faster to circumvent" falls inside
-# the tested range rather than off one end.
-lengths_m: [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]
+# Robot's lateral extent (footprint half-width 0.25m * 2, from
+# costmap_common.yaml's footprint). This is the reference "base length" the
+# swept lateral-length values below are expressed as multiples of --
+# circumventing an obstacle is a purely lateral maneuver, so the obstacle's
+# lateral length is only meaningfully large/small relative to the robot's own
+# lateral (not fore-aft) extent. Logged per-trial (TimingTrialStart.msg /
+# summary.csv) so timing_plotting.py can render axes in robot-width units
+# without hardcoding this value a second time.
+robot_width_m: 0.50
+
+# Swept variable: obstacle lateral length, expressed as MULTIPLES of
+# robot_width_m (not absolute meters) -- e.g. 1.0 = same width as the robot,
+# 8.0 = 8x the robot's width. Actual meters = robot_width_m * value, computed
+# by timing_sweep_orchestrator.py. [1..8] reproduces the same absolute range
+# (0.5m..4.0m) this sweep originally used, now expressed relative to the
+# robot. Range chosen relative to robot/costmap geometry (inflation_radius
+# 0.80m) so any crossover between "faster to push" and "faster to
+# circumvent" falls inside the tested range rather than off one end.
+lengths_robot_widths: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]
 
 # Mass/mu for the MOVABLE arm -- matches movable_box_* in
 # mixed_obstacles_test.world / cube_light_* in contact_classification_test.world,
 # both confirmed MOVABLE across the whole mass/mu sweep.
-movable_mass_kg: 5.0
+movable_mass_kg: 15.0
 movable_mu: 0.1
 
 # Mass/mu for the SOLID arm (and reused for the CLASSICAL arm's object, even
@@ -76,7 +90,21 @@ goal_settle_time: 1.0
 no_contact_timeout: 25.0    # [s] movable/solid arms only -- give up waiting for CONTACT_PROBE entry
 trial_timeout: 180.0        # [s] overall per-trial safety net, all arms
 
-repeats: 3                  # repeats per (length, arm) cell
+# repeats per (length, arm) cell. Bumped from 3 -- timing_plotting.py's
+# outlier_filter (see plot_config.exclude_duration_outliers()) drops any
+# trial whose total_time_s is > 3x its ARM's median across the whole sweep,
+# which a real sim glitch can still trigger (confirmed live: 7/24 movable
+# trials at speed_factor=2.0, roughly one per length cell). With only 3
+# repeats, losing one to the filter leaves just 2 genuine samples for that
+# length's mean; 5 keeps a meaningful sample even after one gets dropped.
+repeats: 5
+
+# Optional Gazebo speed-up (EXPERIMENTAL) -- see tuning_sweep.yaml's
+# speed_factor comment / RealTimeFactorController in trial_core.py for the
+# full explanation. Best-effort target multiple of real-time via scaling
+# max_update_rate only; recorded durations are SIM time so they're
+# unaffected by whatever factor is actually achieved.
+speed_factor: 1.0           # 1.0 = disabled (real-time). Try 2.0 for a 2x target.
 
 # Margin added to (length / 2) when scaling contact_probe_manager's
 # exclusion/refine radii to this trial's object (see

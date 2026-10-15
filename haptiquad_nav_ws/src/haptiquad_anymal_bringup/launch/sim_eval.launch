@@ -12,8 +12,26 @@
        params (rosparam load merges into the existing tree, it does not
        replace it): see that file's own header comment. -->
 
+  <!-- Note on "rendering": gazebo_gui (gzclient, the Gazebo 3D window) is
+       already disabled by default in anymal_c/config/default.yaml's `sim`
+       stack, so it never opens regardless of this arg. The window that DOES
+       open by default is the `user_interface` stack's `rviz` node (the
+       ANYmal "legacy" GUI, anymal_c/config.rviz); that's what this arg
+       controls. gzserver's own internal OGRE rendering context (needed for
+       the robot's GPU depth-camera/lidar sensor plugins) cannot be disabled
+       without breaking those sensors, a hard Gazebo constraint, not
+       something togglable here; the "couldn't disable rendering" error
+       refers to that gzserver-internal requirement, not to any visible
+       window. It's a non-issue as long as a real/virtual X display is
+       available to the container (there already is one here). -->
+  <arg name="rviz" default="true"
+       doc="Launch the ANYmal legacy GUI's rviz instance (stack_launcher user_interface/rviz node). Set false to skip opening it."/>
+
   <include file="$(find haptiquad_anymal_bringup)/launch/sim.launch">
     <arg name="environment_data_package" value="haptiquad_anymal_bringup"/>
     <arg name="environment_config"       value="eval_empty_world"/>
   </include>
+
+  <param name="/stack_launcher/stacks/user_interface/nodes/rviz/enabled"
+         value="false" type="bool" unless="$(arg rviz)"/>
 </launch>

@@ -37,7 +37,7 @@ import rospy
 
 from std_msgs.msg import String
 from haptiquad_nav_eval.msg import TimingTrialStart
-from haptiquad_nav_eval.trial_core import GoalCompletionWatcher
+from haptiquad_nav_eval.trial_core import GoalCompletionWatcher, SimHealthMonitor
 
 
 def _default_results_dir():
@@ -49,11 +49,17 @@ SUMMARY_FIELDS = [
     'object_name', 'mass_kg', 'mu', 'geometry', 'size_x', 'size_y', 'size_z',
     'spawn_x', 'spawn_y', 'goal_x', 'goal_y',
     'approach_angle_rad', 'robot_origin_x', 'robot_origin_y', 'robot_origin_yaw',
+    'robot_width_m',
     't_goal_sent', 't_probe_entry', 't_classify_entry', 't_classify_exit',
     't_backup_entry', 't_backup_exit', 't_finish',
     'total_time_s', 't_pre_contact_s', 't_probe_to_classify_exit_s',
     't_backup_s', 't_post_classify_to_finish_s',
     'classified_label', 'end_reason', 'final_state',
+    # Set by SimHealthMonitor (trial_core.py) if a Gazebo physics
+    # explosion/teleport, tip-over, out-of-range height, or a stall was
+    # detected during the trial -- empty string if clean. Excluded from
+    # aggregate stats by timing_plotting.py's load_summary().
+    'sim_anomaly',
 ]
 
 NAN = float('nan')
@@ -70,6 +76,7 @@ class TimingTrialLogger:
         self._watchdog_s = rospy.get_param('trial_timeout', 180.0) + 20.0
 
         self._watcher = GoalCompletionWatcher(goal_tolerance_m, goal_settle_time)
+        self._health = SimHealthMonitor()
 
         self._trial = None
         self._finished_current = True   # no trial in flight yet
@@ -115,6 +122,7 @@ class TimingTrialLogger:
         # _set_probing_enabled_cb).
 
         self._watcher.arm(msg.goal_x, msg.goal_y)
+        self._health.arm()
 
         if self._watchdog_timer is not None:
             self._watchdog_timer.shutdown()
@@ -211,6 +219,7 @@ class TimingTrialLogger:
             'approach_angle_rad': trial.approach_angle,
             'robot_origin_x': trial.robot_origin_x, 'robot_origin_y': trial.robot_origin_y,
             'robot_origin_yaw': trial.robot_origin_yaw,
+            'robot_width_m': trial.robot_width_m,
             't_goal_sent': t_goal_sent,
             't_probe_entry': self._t_probe_entry if self._t_probe_entry is not None else NAN,
             't_classify_entry': self._t_classify_entry if self._t_classify_entry is not None else NAN,
@@ -226,6 +235,7 @@ class TimingTrialLogger:
             'classified_label': classified_label,
             'end_reason': end_reason,
             'final_state': self._state,
+            'sim_anomaly': self._health.anomaly() or '',
         }
 
         summary_path = os.path.join(csv_dir, 'summary.csv')

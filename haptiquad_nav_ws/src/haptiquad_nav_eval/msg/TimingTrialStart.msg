@@ -36,3 +36,5 @@ float64 approach_angle      # rad, map-frame heading the robot drives in on (fix
 float64 robot_origin_x      # map frame, robot pose immediately after reset
 float64 robot_origin_y
 float64 robot_origin_yaw
+
+float64 robot_width_m        # m, robot's lateral footprint extent -- size_y's normalization base (see timing_sweep.yaml)

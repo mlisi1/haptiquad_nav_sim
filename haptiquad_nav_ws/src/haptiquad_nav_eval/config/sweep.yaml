@@ -22,6 +22,20 @@ trial_timeout: 60.0          # [s] overall per-trial safety net
 
 repeats: 1                   # repeats per (geometry, mass, mu, angle, offset) combo
 
+# Optional Gazebo speed-up (EXPERIMENTAL) -- best-effort request for Gazebo
+# to target this multiple of real-time by scaling max_update_rate only
+# (physics step SIZE, gravity, and ODE solver settings are untouched, so
+# simulated dynamics/timing fidelity is unaffected -- only how many
+# wall-clock seconds it takes to compute them). Since navigation.launch sets
+# /use_sim_time:true, every timestamp this harness records is SIM time, so
+# recorded durations are unaffected by whatever factor is actually achieved
+# -- this only shortens how long you wait in the real world. If the CPU
+# can't keep up, Gazebo just falls back to whatever it can sustain -- a
+# target, not a guarantee. Restored automatically when the sweep ends (or
+# is killed) via rospy.on_shutdown. See RealTimeFactorController in
+# trial_core.py; same mechanism tuning_sweep.yaml uses.
+speed_factor: 1.0             # 1.0 = disabled (real-time). Try 2.0 for a 2x target.
+
 # Where CSVs are written. Defaults to <this package>/.results (a hidden,
 # gitignored folder under the source tree, NOT the container's home dir) so
 # results land on the host bind-mount and are visible outside Docker.

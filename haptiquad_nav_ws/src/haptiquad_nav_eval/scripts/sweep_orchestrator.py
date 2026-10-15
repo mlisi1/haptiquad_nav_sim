@@ -35,7 +35,8 @@ import rospkg
 import rospy
 
 from haptiquad_nav_eval.trial_core import (ObjectSpawner, SimReset, GoalSender, PoseCache,
-                                           StateWatcher, plan_object_and_goal)
+                                           StateWatcher, SimHealthMonitor,
+                                           RealTimeFactorController, plan_object_and_goal)
 from haptiquad_nav_eval.plotting import generate_all as generate_all_plots
 from haptiquad_nav_eval.msg import TrialStart
 
@@ -62,6 +63,7 @@ class SweepOrchestrator:
         self._no_contact_timeout = rospy.get_param('no_contact_timeout', 25.0)
         self._trial_timeout = rospy.get_param('trial_timeout', 60.0)
         self._repeats = rospy.get_param('repeats', 1)
+        self._speed_factor = rospy.get_param('speed_factor', 1.0)
 
         geoms = rospy.get_param('geometries')
         masses = rospy.get_param('sweep/mass_kg')
@@ -96,6 +98,15 @@ class SweepOrchestrator:
         self._goals = GoalSender()
         self._pose = PoseCache()
         self._state = StateWatcher()
+        self._health = SimHealthMonitor()
+
+        # Optional speed-up -- see sweep.yaml's speed_factor comment.
+        # restore() is registered on shutdown FIRST so a crash/Ctrl-C during
+        # startup still restores physics if apply() already changed it.
+        self._rtf = RealTimeFactorController()
+        rospy.on_shutdown(self._rtf.restore)
+        if self._speed_factor != 1.0:
+            self._rtf.apply(self._speed_factor)
 
         self._snapshot_contact_probe_config()
 
@@ -166,6 +177,7 @@ class SweepOrchestrator:
             rospy.loginfo('[SweepOrchestrator] Resumed: skipped %d already-completed trials.',
                           n_skipped)
         rospy.loginfo('[SweepOrchestrator] Sweep complete (%d trials).', len(self._combos))
+        self._rtf.restore()
         self._generate_plots()
 
     def _generate_plots(self):
@@ -238,6 +250,7 @@ class SweepOrchestrator:
         msg.robot_origin_x, msg.robot_origin_y, msg.robot_origin_yaw = rx, ry, ryaw
 
         self._state.reset_edges()
+        self._health.arm()
         self._trial_pub.publish(msg)
         self._goals.send(gx, gy, angle)
 
@@ -245,6 +258,12 @@ class SweepOrchestrator:
         while not rospy.is_shutdown():
             elapsed = (rospy.Time.now() - t0).to_sec()
             if self._state.saw_contact_probe and self._state.state == 'NORMAL_NAV':
+                break
+            anomaly = self._health.anomaly()
+            if anomaly is not None:
+                rospy.logwarn('[SweepOrchestrator] Trial %d: %s -- abandoning trial early '
+                              '(trial_logger.py will record it as anomalous).',
+                              trial_id, anomaly)
                 break
             if not self._state.saw_contact_probe and elapsed > self._no_contact_timeout:
                 rospy.logwarn(
