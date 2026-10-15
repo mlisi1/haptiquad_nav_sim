@@ -38,12 +38,16 @@ if [[ "${1:-}" == "--inner" ]]; then
   tag_dir=$WS_CONTAINER/src/haptiquad_nav_eval/.results/$tag
   log_dir=$tag_dir/runner_logs/attempt_$attempt
   mkdir -p "$log_dir"
+  echo $$ > "$tag_dir/runner_logs/inner.pid"   # pid: host, so the host can signal it
 
+  set +u   # the ROS setup scripts read unset variables
   source /opt/ros/noetic/setup.bash
   source $WS_CONTAINER/devel/setup.bash
+  set -u
   export ROS_MASTER_URI=http://localhost:$ROS_PORT
   export GAZEBO_MASTER_URI=http://localhost:$GZ_PORT
   export HAPTIQUAD_RUN_ID="haptiquad_sweep_${tag}_$$"
+  export PYTHONUNBUFFERED=1   # node output reaches the per-attempt logs as it happens
 
   log() { echo "[$(date '+%F %T')] $*" | tee -a "$log_dir/runner.log"; }
 
@@ -88,8 +92,17 @@ if [[ "${1:-}" == "--inner" ]]; then
 
   start sim roslaunch haptiquad_anymal_bringup sim_eval.launch rviz:=false
   sim_pid=${pids[-1]}
+  # /state_estimator/reset only exists with the real estimator module; the
+  # harness treats it as optional, so wait for the estimator's output instead.
   wait_for 240 /gazebo/reset_world rosservice info /gazebo/reset_world \
-    && wait_for 240 /state_estimator/reset rosservice info /state_estimator/reset || exit 3
+    && wait_for 240 /state_estimator/anymal_state \
+         timeout 5 rostopic echo -n 1 --noarr /state_estimator/anymal_state || exit 3
+
+  # HaptiQuad momentum observer + force estimator (/estimated_forces): without
+  # it the base wrench is never published and no contact is ever detected.
+  start haptiquad roslaunch haptiquad_anymal_bringup anymal_bringup.launch
+  hq_pid=${pids[-1]}
+  wait_for 120 /estimated_forces timeout 5 rostopic echo -n 1 --noarr /estimated_forces || exit 3
 
   start nav roslaunch haptiquad_nav navigation.launch rviz:=false init_robot:=true
   nav_pid=${pids[-1]}
@@ -111,7 +124,7 @@ if [[ "${1:-}" == "--inner" ]]; then
     sleep 30
     sample
     if [[ -f $tag_dir/DONE ]]; then log "sweep finished"; exit 0; fi
-    for n in sim_pid nav_pid eval_pid; do
+    for n in sim_pid hq_pid nav_pid eval_pid; do
       if ! alive "${!n}"; then log "${n%_pid} launch exited unexpectedly"; exit 3; fi
     done
     m=$(stat -c %Y "$progress" 2>/dev/null || echo 0)
@@ -166,9 +179,9 @@ fi
 
 mkdir -p "$tag_dir_host/runner_logs"
 
-# docker exec does not forward Ctrl-C; pass it on so the inner side cleans up.
-# Matching on the full "--inner <launch> <tag>" argv is specific to this run.
-trap 'hlog "stopping"; docker exec $CONTAINER pkill -INT -f "run_sweep.sh --inner $launch_file $tag " ; exit 4' INT TERM
+# docker exec does not forward Ctrl-C; pass it on so the inner side cleans up
+# (the container shares the host pid namespace, so its pid is valid here).
+trap 'hlog "stopping"; kill -INT "$(cat "$tag_dir_host/runner_logs/inner.pid" 2>/dev/null)" 2>/dev/null; exit 4' INT TERM
 
 if [[ -z "${SKIP_BUILD:-}" ]]; then
   hlog "building"
