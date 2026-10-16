@@ -594,7 +594,7 @@ def plot_confusion_matrix(df, out_path, cfg, gt_col, gt_description):
         acc = (tp + tn) / total
         precision = tp / (tp + fp) if (tp + fp) else float('nan')
         recall = tp / (tp + fn) if (tp + fn) else float('nan')
-        stats = 'accuracy=%.2f  precision=%.2f  recall=%.2f  (n=%d' % (acc, precision, recall, total)
+        stats = 'accuracy=%.2f  precision=%.2f  recall=%.2f\n(n=%d' % (acc, precision, recall, total)
     else:
         stats = '(n=0'
     stats += ', %d NO_CONTACT/INCOMPLETE excluded)' % n_excluded if n_excluded else ')'
