@@ -7,3 +7,5 @@ haptiquad_nav_ws/src/CMakeLists.txt
 __pycache__/
 *.md
 frames.gv
+*.svg
+.vscode/
