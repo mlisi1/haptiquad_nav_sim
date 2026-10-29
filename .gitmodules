@@ -7,8 +7,8 @@
 	branch = noetic
 [submodule "haptiquad_nav_ws/src/anymal_c_simple_description"]
 	path = haptiquad_nav_ws/src/anymal_c_simple_description
-	url = git@github.com:mlisi1/anymal_c_simple_description.git
+	url = https://github.com/mlisi1/anymal_c_simple_description.git
 	branch = noetic-floating-base
 [submodule "haptiquad_nav_ws/src/haptiquad_nav"]
 	path = haptiquad_nav_ws/src/haptiquad_nav
-	url = git@github.com:mlisi1/haptiquad_nav.git
+	url = https://github.com/mlisi1/haptiquad_nav.git
