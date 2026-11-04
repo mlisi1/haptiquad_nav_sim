@@ -6,7 +6,6 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   std_srvs
   geometry_msgs
-  gazebo_msgs
   diagnostic_msgs
   actionlib_msgs
   haptiquad_msgs
@@ -33,7 +32,7 @@ generate_messages(
 )
 
 catkin_package(
-  CATKIN_DEPENDS message_runtime std_msgs std_srvs geometry_msgs gazebo_msgs
+  CATKIN_DEPENDS message_runtime std_msgs std_srvs geometry_msgs
     diagnostic_msgs actionlib_msgs haptiquad_msgs
 )
 

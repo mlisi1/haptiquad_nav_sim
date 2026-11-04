@@ -27,8 +27,9 @@ import tf.transformations
 from geometry_msgs.msg import PoseStamped, Quaternion, Pose
 from std_msgs.msg import String
 from std_srvs.srv import Empty as EmptySrv
-from gazebo_msgs.srv import (SpawnModel, DeleteModel, GetWorldProperties,
-                             GetPhysicsProperties, SetPhysicsProperties)
+# gazebo_msgs is imported lazily inside ObjectSpawner / RealTimeFactorController
+# (the only Gazebo users) so the package builds and the loggers run on the real
+# robot, where gazebo_msgs is not installed.
 
 
 G = 9.81  # m/s^2, matches gravity_z in haptiquad_anymal_bringup/config/default.yaml
@@ -101,6 +102,7 @@ def make_sdf(name, geometry, mass, mu, size_x, size_y, size_z):
 class ObjectSpawner:
 
     def __init__(self):
+        from gazebo_msgs.srv import SpawnModel, DeleteModel, GetWorldProperties
         rospy.wait_for_service('/gazebo/spawn_sdf_model', timeout=30.0)
         rospy.wait_for_service('/gazebo/delete_model', timeout=30.0)
         rospy.wait_for_service('/gazebo/get_world_properties', timeout=30.0)
@@ -541,11 +543,12 @@ class RealTimeFactorController:
         self._get = None
         self._set = None
         try:
+            from gazebo_msgs.srv import GetPhysicsProperties, SetPhysicsProperties
             rospy.wait_for_service('/gazebo/get_physics_properties', timeout=10.0)
             rospy.wait_for_service('/gazebo/set_physics_properties', timeout=10.0)
             self._get = rospy.ServiceProxy('/gazebo/get_physics_properties', GetPhysicsProperties)
             self._set = rospy.ServiceProxy('/gazebo/set_physics_properties', SetPhysicsProperties)
-        except rospy.ROSException as e:
+        except (rospy.ROSException, ImportError) as e:
             rospy.logwarn('[RealTimeFactorController] Gazebo physics services '
                           'unavailable -- speed_factor will be ignored: %s', e)
 

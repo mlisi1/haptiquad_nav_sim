@@ -20,7 +20,6 @@
   <depend>std_msgs</depend>
   <depend>std_srvs</depend>
   <depend>geometry_msgs</depend>
-  <depend>gazebo_msgs</depend>
   <depend>diagnostic_msgs</depend>
   <depend>actionlib_msgs</depend>
   <depend>haptiquad_msgs</depend>
