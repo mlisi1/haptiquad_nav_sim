@@ -9,3 +9,8 @@ __pycache__/
 frames.gv
 *.svg
 .vscode/
+# robot/sim recordings and generated paper figures
+bags/
+*.bag
+*.bag.active
+paper_figures/
