@@ -7,3 +7,10 @@ haptiquad_nav_ws/src/CMakeLists.txt
 __pycache__/
 *.md
 frames.gv
+*.svg
+.vscode/
+# robot/sim recordings and generated paper figures
+bags/
+*.bag
+*.bag.active
+paper_figures/
